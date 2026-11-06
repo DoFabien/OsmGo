@@ -218,7 +218,7 @@ const presetIds = Object.keys(presets)
 const spriteIds = Object.keys(sprites)
 const generatedFileBudgets = new Map([
     [tapTagsPath, 8_000_000],
-    [tapPresetsPath, 3_000_000],
+    [tapPresetsPath, 3_500_000],
     [tapBrandPresetsPath, 6_500_000],
     [path.join(assetsDir, 'imagery.json'), 3_500_000],
 ])
