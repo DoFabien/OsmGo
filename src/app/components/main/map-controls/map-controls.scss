@@ -179,6 +179,22 @@ button {
 
 .geolocation-button {
     grid-column: 3;
+    justify-self: center;
+    color: var(--osmgo-blue);
+    background: var(--osmgo-blue-container);
+
+    mat-icon {
+        font-variation-settings:
+            'FILL' 1,
+            'wght' 600,
+            'GRAD' 0,
+            'opsz' 28;
+    }
+
+    &:disabled {
+        color: var(--osmgo-ink-muted);
+        background: var(--osmgo-surface-muted);
+    }
 }
 
 :host ::ng-deep .refresh-button .mdc-button__label {
