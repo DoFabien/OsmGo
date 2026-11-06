@@ -10,6 +10,7 @@ export interface Basemap {
     id: string
     name: string
     tiles: string[]
+    scheme?: 'xyz' | 'tms'
     max_zoom?: number
     attribution?: { text?: string }
     [key: string]: unknown

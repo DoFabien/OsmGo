@@ -5,15 +5,25 @@ import {
     IGN_BDORTHO_ID,
     IGN_BDORTHO_MAX_ZOOM,
 } from '@osmgo/shared/basemap.constants'
-import { centroid } from '@turf/centroid'
+import { pointOnFeature } from '@turf/point-on-feature'
 import fs from 'fs-extra'
 import stringify from 'json-stringify-pretty-compact'
 import path from 'path'
 import { fetchJson, fetchResponse } from './_fetch'
 import { assetsDir } from './_paths'
-import { buildTileTestUrl, compareImageryPriority } from './basemap-utils'
+import {
+    buildTileTestUrl,
+    compareImageryPriority,
+    toImageryFeature,
+} from './basemap-utils'
 
 const url = `https://osmlab.github.io/editor-layer-index/imagery.geojson`
+
+// Osm Go only offers current imagery as a background: historic layers, maps,
+// elevation and overlays are left out to keep imagery.json small.
+const keptCategories: string[] = ['photo']
+
+const testMaxZoom = 16
 
 const ignoredIds: string[] = [
     'osm-mapnik-black_and_white', // ignored because it does not support CORS
@@ -22,14 +32,21 @@ const ignoredIds: string[] = [
 
 // check if the url is valid and if it supports CORS
 const checkUrl = async (feature: any) => {
+    // The deepest zooms are often missing outside the main areas: test at the
+    // zoom Osm Go edits at, but never outside the layer's own range.
     const maxZoom = feature.properties.max_zoom || 15
-    const limits = { min_zoom: maxZoom - 1, max_zoom: maxZoom - 1 }
+    const testZoom = Math.max(
+        feature.properties.min_zoom ?? 0,
+        Math.min(maxZoom - 1, testMaxZoom)
+    )
+    const limits = { min_zoom: testZoom, max_zoom: testZoom }
 
     let coords = [79.08096313476562, 21.135184856708992]
     if (feature.geometry) {
         try {
-            const pointCentroid = centroid(feature)
-            coords = pointCentroid.geometry.coordinates
+            // a centroid can fall outside a coastal or multipart coverage
+            const pointInside = pointOnFeature(feature)
+            coords = pointInside.geometry.coordinates
         } catch (error) {
             console.error(error)
             return false
@@ -55,20 +72,22 @@ const checkUrl = async (feature: any) => {
     if (typeof tileTemplate !== 'string') return false
     const testUrl = buildTileTestUrl(tileTemplate, x, y, z, bbox, quadkey)
 
-    try {
-        const response = await fetchResponse(testUrl, 5_000)
+    for (const timeout of [5_000, 15_000]) {
+        try {
+            const response = await fetchResponse(testUrl, timeout)
 
-        if (
-            response.status === 200 &&
-            response.headers.get('access-control-allow-origin') === '*'
-        ) {
-            return feature
+            if (
+                response.status === 200 &&
+                response.headers.get('access-control-allow-origin') === '*'
+            ) {
+                return feature
+            }
+            return false
+        } catch {
+            // network error or timeout: retry once with a longer timeout
         }
-        return false
-    } catch (error) {
-        // console.error(error)
-        return false
     }
+    return false
 }
 
 const tileToQuadkey = (x, y, z) => {
@@ -115,9 +134,18 @@ const run = async () => {
     // const features = data.features.filter((feature:any) => feature.properties.id === 'Bing')
 
     const featuresToCheck = []
+    const bing = []
     for (const feature of features) {
         if (ignoredIds.includes(feature.properties.id)) {
             // Ignore this imagery
+            continue
+        }
+
+        if (
+            feature.properties.overlay ||
+            (feature.properties.type !== 'bing' &&
+                !keptCategories.includes(feature.properties.category))
+        ) {
             continue
         }
 
@@ -158,6 +186,10 @@ const run = async () => {
                 url: 'https://blog.openstreetmap.org/2010/11/30/microsoft-imagery-details/',
             }
             feature.properties['max_zoom'] = BING_MAX_ZOOM
+            // default basemap with hard-coded tiles: keep it even when the
+            // test tile times out
+            bing.push(feature)
+            continue
         } else if (feature.properties.id === IGN_BDORTHO_ID) {
             feature.properties['tiles'].push(furl)
             feature.properties['max_zoom'] = IGN_BDORTHO_MAX_ZOOM
@@ -198,41 +230,10 @@ const run = async () => {
         noValidBaseMaps.length
     )
 
-    const bing = resultFeatures.filter((f) =>
-        ['bing'].includes(f.properties.type)
-    )
-    const catPhoto = resultFeatures
-        .filter(
-            (f) =>
-                ['photo'].includes(f.properties.category) &&
-                !['bing'].includes(f.properties.type)
-        )
-        .sort(compareImageryPriority)
-
-    const catHistoricphoto = resultFeatures.filter((f) =>
-        ['historicphoto'].includes(f.properties.category)
-    )
-    const catOsmbasedmap = resultFeatures.filter((f) =>
-        ['map', 'osmbasedmap'].includes(f.properties.category)
-    )
-    const catQa = resultFeatures.filter((f) =>
-        ['qa'].includes(f.properties.category)
-    )
-    const catOther = resultFeatures.filter(
-        (f) =>
-            !['photo', 'historicphoto', 'map', 'osmbasedmap', 'qa'].includes(
-                f.properties.category
-            ) && !['bing'].includes(f.properties.type)
-    )
-
     const ordered = [
         ...bing,
-        ...catPhoto,
-        ...catHistoricphoto,
-        ...catOsmbasedmap,
-        ...catQa,
-        ...catOther,
-    ]
+        ...resultFeatures.sort(compareImageryPriority),
+    ].map(toImageryFeature)
     const outPath = path.join(assetsDir, 'imagery.json')
 
     fs.writeFileSync(outPath, stringify(ordered), 'utf-8')

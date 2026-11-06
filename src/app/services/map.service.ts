@@ -450,6 +450,7 @@ export class MapService {
         const bmSource: RasterSourceSpecification = {
             type: 'raster',
             tiles: baseMap.tiles,
+            scheme: baseMap.scheme ?? 'xyz',
             tileSize: 256,
             maxzoom: baseMap.max_zoom,
         }
