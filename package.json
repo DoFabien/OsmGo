@@ -25,7 +25,7 @@
     "test:ci": "npm run config && ng test --configuration ci --coverage && ng test --configuration browser",
     "test:converter": "tsx scripts/osmToOsmgo/test.js",
     "test:sprites": "tsx --tsconfig ./scripts/tsconfig.json ./scripts/generateSprites.test.ts",
-    "test:scripts": "tsx --tsconfig ./scripts/tsconfig.json ./scripts/_fetch.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/basemap-utils.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/nameSuggestionIndex.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/validateGeneratedCatalog.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/presets.test.ts",
+    "test:scripts": "tsx --tsconfig ./scripts/tsconfig.json ./scripts/_fetch.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/basemap-utils.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/nameSuggestionIndex.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/validateGeneratedCatalog.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/presets.test.ts && tsx --tsconfig ./scripts/tsconfig.json ./scripts/svgFormat.test.ts",
     "catalog:validate": "tsx --tsconfig ./scripts/tsconfig.json ./scripts/validateGeneratedCatalog.ts",
     "test:integration": "playwright test",
     "test:integration:install": "playwright install chromium",
