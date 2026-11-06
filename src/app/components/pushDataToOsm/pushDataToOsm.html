@@ -192,6 +192,21 @@
                     {{ 'SEND_DATA.TOTAL_ITEMS' | translate }} · {{
                     featuresChanges().length }}
                 </h2>
+                @if (featuresChanges().length > 0) {
+                <button
+                    mat-button
+                    class="delete-all"
+                    data-testid="delete-all-changes"
+                    type="button"
+                    [disabled]="uploadInFlight() || !!activeJournal()"
+                    (click)="presentConfirm()"
+                >
+                    <mat-icon fontSet="material-symbols-rounded"
+                        >delete_sweep</mat-icon
+                    >
+                    {{ 'SEND_DATA.DELETE' | translate }}
+                </button>
+                }
             </div>
 
             <div class="change-list">
@@ -290,13 +305,12 @@
     <footer class="upload-actions">
         <button
             mat-button
-            class="delete-all"
+            data-testid="cancel-upload"
             type="button"
-            [disabled]="uploadInFlight() || !!activeJournal()"
-            (click)="presentConfirm()"
+            [disabled]="uploadInFlight()"
+            (click)="back()"
         >
-            <mat-icon fontSet="material-symbols-rounded">delete_sweep</mat-icon>
-            {{ 'SEND_DATA.DELETE' | translate }}
+            {{ 'SHARED.CANCEL' | translate }}
         </button>
         <button
             mat-flat-button

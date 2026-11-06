@@ -188,6 +188,17 @@ describe('PushDataToOsmPage', () => {
         expect(close).not.toHaveBeenCalled()
     })
 
+    it('closes without touching the pending queue when cancelled', () => {
+        const { page, dataService, close } = createPage({
+            features: [queuedFeature()],
+        })
+
+        page.back()
+
+        expect(close).toHaveBeenCalledOnce()
+        expect(dataService.cancelAllPendingChanges).not.toHaveBeenCalled()
+    })
+
     it('delegates upload and closes exactly once after success', async () => {
         const feature = queuedFeature()
         const { page, stateSignal, coordinator, close } = createPage({

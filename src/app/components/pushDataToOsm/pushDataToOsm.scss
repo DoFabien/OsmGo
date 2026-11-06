@@ -323,7 +323,17 @@
 }
 
 .delete-all {
+    min-height: 32px;
+    margin-left: auto;
+    padding-inline: 8px;
     color: var(--osmgo-error);
+    font-size: 13px;
+
+    mat-icon {
+        width: 18px;
+        height: 18px;
+        font-size: 18px;
+    }
 }
 
 .upload-overlay {
