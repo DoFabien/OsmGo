@@ -232,7 +232,8 @@ describe('OsmApiService', () => {
             '123',
             expect.any(Number),
             expect.any(Number),
-            `Commerces & cafés <centre> "nuit"`
+            `Commerces & cafés <centre> "nuit"`,
+            undefined
         )
     })
 
@@ -285,9 +286,102 @@ describe('OsmApiService', () => {
             await expect(
                 firstValueFrom(service.getValidChangeset('Survey'))
             ).resolves.toBe('456')
-            expect(create).toHaveBeenCalledWith('Survey')
+            expect(create).toHaveBeenCalledWith('Survey', undefined)
         }
     )
+
+    describe('reuse of the open changeset', () => {
+        const openChangeset = (bbox?: number[]) => ({
+            id: '123',
+            comment: 'Survey',
+            created_at: Date.now(),
+            last_changeset_activity: Date.now(),
+            ...(bbox ? { bbox } : {}),
+        })
+        const setup = (bbox?: number[]) => {
+            const configService = {
+                getChangeset: () => openChangeset(bbox),
+                setChangesetBbox: vi.fn(),
+                getIsDevServer: () => false,
+            }
+            const http = { put: vi.fn().mockReturnValue(of('')) }
+            const service = createService({
+                http,
+                configService,
+                osmAuthService: {
+                    getToken: () => 'token',
+                    oauthParam: {
+                        prod: { url: 'https://api.openstreetmap.org' },
+                    },
+                },
+            })
+            const create = vi
+                .spyOn(service, 'createOSMChangeSet')
+                .mockReturnValue(of('456'))
+            return { service, configService, http, create }
+        }
+
+        it('reuses it nearby and extends the area it covers', async () => {
+            const { service, configService, create } = setup([
+                5.7, 45.1, 5.8, 45.2,
+            ])
+
+            await expect(
+                firstValueFrom(
+                    service.getValidChangeset(
+                        'Survey',
+                        [5.75, 45.15, 5.9, 45.3]
+                    )
+                )
+            ).resolves.toBe('123')
+            expect(create).not.toHaveBeenCalled()
+            expect(configService.setChangesetBbox).toHaveBeenCalledWith([
+                5.7, 45.1, 5.9, 45.3,
+            ])
+        })
+
+        it('opens a new one and closes the old one when the area grows too large', async () => {
+            const { service, http, create } = setup([5.7, 45.1, 5.8, 45.2])
+
+            await expect(
+                firstValueFrom(
+                    service.getValidChangeset('Survey', [2.3, 48.8, 2.4, 48.9])
+                )
+            ).resolves.toBe('456')
+            expect(create).toHaveBeenCalledWith(
+                'Survey',
+                [2.3, 48.8, 2.4, 48.9]
+            )
+            expect(http.put).toHaveBeenCalledWith(
+                'https://api.openstreetmap.org/api/0.6/changeset/123/close',
+                '',
+                expect.anything()
+            )
+        })
+
+        it('does not reuse one whose covered area is unknown', async () => {
+            const { service, create } = setup()
+
+            await expect(
+                firstValueFrom(
+                    service.getValidChangeset('Survey', [1, 1, 1, 1])
+                )
+            ).resolves.toBe('456')
+            expect(create).toHaveBeenCalledOnce()
+        })
+
+        it('keeps uploading when closing the old one fails', async () => {
+            const { service, http } = setup([5.7, 45.1, 5.8, 45.2])
+            http.put.mockReturnValue(throwError(() => new Error('offline')))
+            vi.spyOn(console, 'warn').mockReturnValue(undefined)
+
+            await expect(
+                firstValueFrom(
+                    service.getValidChangeset('Survey', [0, 0, 0, 0])
+                )
+            ).resolves.toBe('456')
+        })
+    })
 
     describe('diff result XML', () => {
         let service: OsmApiService
@@ -529,14 +623,17 @@ describe('OsmApiService', () => {
         })
 
         async function expectRequestToTimeOut(
-            request: Observable<unknown>
+            request: Observable<unknown>,
+            timeoutMs = 30000
         ): Promise<void> {
             let requestError: Error | undefined
             request.subscribe({
                 error: (error: Error) => (requestError = error),
             })
 
-            await vi.advanceTimersByTimeAsync(30001)
+            await vi.advanceTimersByTimeAsync(timeoutMs - 1)
+            expect(requestError).toBeUndefined()
+            await vi.advanceTimersByTimeAsync(2)
 
             expect(requestError?.name).toBe('TimeoutError')
         }
@@ -556,12 +653,19 @@ describe('OsmApiService', () => {
             await expectRequestToTimeOut(service.createOSMChangeSet('Survey'))
         })
 
-        it('times out diff uploads', async () => {
+        it('gives a diff upload 150 seconds before calling it uncertain', async () => {
             http.post.mockReturnValue(NEVER)
 
             await expectRequestToTimeOut(
-                service.apiOsmSendOsmDiffFile('<osmChange/>', '123')
+                service.apiOsmSendOsmDiffFile('<osmChange/>', '123'),
+                150000
             )
+        })
+
+        it('times out changeset downloads', async () => {
+            http.get.mockReturnValue(NEVER)
+
+            await expectRequestToTimeOut(service.downloadChangeset$('123'))
         })
     })
 
@@ -651,7 +755,10 @@ describe('OsmApiService', () => {
                 }),
             }
             const tagsService = {
-                tags: () => [{ key: 'amenity' }],
+                tags: () => {
+                    throw new Error('the full catalogue must not be sent')
+                },
+                converterTags: () => [{ key: 'amenity' }],
                 primaryKeys: () => ['amenity'],
             }
             service = createService({ tagsService, dataService })
@@ -687,6 +794,7 @@ describe('OsmApiService', () => {
                 oldBboxFeature: { id: 'downloaded-area' },
                 geojsonChanged,
                 limitFeatures: 100,
+                maxIncompleteRelations: 20,
             })
 
             FakeWorker.latest.onmessage({
@@ -706,6 +814,79 @@ describe('OsmApiService', () => {
                 geojsonBbox: { type: 'FeatureCollection', features: [] },
             })
             expect(FakeWorker.latest.terminateCalls).toBe(1)
+        })
+
+        describe('multipolygons cut by the edge of the area', () => {
+            const emptyResult = {
+                geojson: { type: 'FeatureCollection', features: [] },
+                geojsonBbox: { type: 'FeatureCollection', features: [] },
+            }
+            const createWithHttp = (get: ReturnType<typeof vi.fn>) =>
+                createService({
+                    http: { get },
+                    tagsService: {
+                        converterTags: () => [{ key: 'leisure' }],
+                        primaryKeys: () => ['leisure'],
+                    },
+                    dataService: {
+                        getGeojsonBbox: () => ({ features: [] }),
+                    },
+                    configService: { getIsDevServer: () => false },
+                    osmAuthService: {
+                        oauthParam: {
+                            prod: { url: 'https://api.openstreetmap.org' },
+                        },
+                    },
+                })
+
+            it('fetches them in full and resumes the conversion', () => {
+                const get = vi.fn((url: string) =>
+                    url.includes('/relation/40/')
+                        ? of({ elements: [{ type: 'way', id: 11 }] })
+                        : throwError(() => new Error('offline'))
+                )
+                vi.spyOn(console, 'warn').mockReturnValue(undefined)
+                let result: unknown
+                createWithHttp(get)
+                    .formatOsmJsonData$('{}', oldGeojson, geojsonChanged)
+                    .subscribe((value) => (result = value))
+
+                FakeWorker.latest.onmessage({
+                    data: { ok: true, incompleteRelationIds: [40, 41] },
+                })
+
+                expect(get).toHaveBeenCalledWith(
+                    'https://api.openstreetmap.org/api/0.6/relation/40/full.json',
+                    expect.anything()
+                )
+                expect(FakeWorker.latest.postedMessage).toEqual({
+                    supplementalElements: [{ type: 'way', id: 11 }],
+                })
+                expect(result).toBeUndefined()
+
+                FakeWorker.latest.onmessage({
+                    data: { ok: true, data: emptyResult },
+                })
+                expect(result).toEqual(emptyResult)
+            })
+
+            it('goes on without them once the wait budget is spent', () => {
+                vi.useFakeTimers()
+                let resultError: Error | undefined
+                createWithHttp(vi.fn(() => NEVER))
+                    .formatOsmJsonData$('{}', oldGeojson, geojsonChanged)
+                    .subscribe({ error: (error) => (resultError = error) })
+
+                FakeWorker.latest.onmessage({
+                    data: { ok: true, incompleteRelationIds: [40] },
+                })
+                vi.advanceTimersByTime(20_000)
+
+                expect(FakeWorker.latest.postedMessage).toEqual({
+                    supplementalElements: [],
+                })
+                expect(resultError).toBeUndefined()
+            })
         })
 
         it('rejects structurally invalid converted features', () => {
@@ -831,6 +1012,185 @@ describe('OsmApiService', () => {
             subscription.unsubscribe()
 
             expect(FakeWorker.latest.terminateCalls).toBe(1)
+        })
+    })
+
+    describe('XML escaping of multi-line values', () => {
+        it('keeps line breaks and tabs as character references', () => {
+            const service = createService()
+
+            expect(service.escapeXmlValue('line 1\nline 2\r\n\tindented')).toBe(
+                'line 1&#10;line 2&#13;&#10;&#9;indented'
+            )
+        })
+
+        it('keeps a multi-line tag intact in the serialized object', () => {
+            const service = createService()
+            const feature = {
+                type: 'Feature',
+                id: 'node/5',
+                properties: {
+                    id: 5,
+                    type: 'node',
+                    meta: { version: 2 },
+                    tags: { inscription: 'First line\nSecond line' },
+                },
+                geometry: { type: 'Point', coordinates: [1, 2] },
+            } as unknown as OsmGoFeature
+
+            const xml = service.geojson2OsmUpdate(feature, '9')
+
+            expect(xml).toContain('v="First line&#10;Second line"')
+            expect(xml).not.toMatch(/v="[^"]*\n/)
+        })
+    })
+
+    describe('deleting a node that other objects reference', () => {
+        const nodeToDelete = (extra: Record<string, unknown>): OsmGoFeature =>
+            ({
+                type: 'Feature',
+                id: 'node/5',
+                properties: {
+                    id: 5,
+                    type: 'node',
+                    changeType: 'Delete',
+                    meta: { version: 2 },
+                    tags: { highway: 'bus_stop', name: 'Gare' },
+                    ...extra,
+                },
+                geometry: { type: 'Point', coordinates: [1, 2] },
+            }) as unknown as OsmGoFeature
+
+        const sections = (diff: string) => ({
+            modify: diff.match(/<modify>([\s\S]*?)<\/modify>/)?.[1] ?? '',
+            remove: diff.match(/<delete>([\s\S]*?)<\/delete>/)?.[1] ?? '',
+        })
+
+        it.each([
+            ['a way', { usedByWays: ['way/7'] }],
+            ['an old boolean cache', { usedByWays: true }],
+            [
+                'a relation',
+                {
+                    relations: [
+                        { rel: 'relation/9', reltags: {}, role: 'stop' },
+                    ],
+                },
+            ],
+        ])(
+            'removes the tags instead of deleting a node used by %s',
+            (_name, extra) => {
+                const service = createService()
+
+                const { modify, remove } = sections(
+                    service.osmGoFeaturesToOsmDiffFile(
+                        [nodeToDelete(extra)],
+                        '12'
+                    )
+                )
+
+                expect(modify).toContain('<node id="5"')
+                expect(modify).not.toContain('<tag')
+                expect(remove.trim()).toBe('')
+            }
+        )
+
+        it('really deletes a node nothing references', () => {
+            const service = createService()
+
+            const { modify, remove } = sections(
+                service.osmGoFeaturesToOsmDiffFile(
+                    [nodeToDelete({ relations: [], usedByWays: [] })],
+                    '12'
+                )
+            )
+
+            expect(remove).toContain('<node id="5"')
+            expect(modify.trim()).toBe('')
+        })
+    })
+
+    describe('upload and changeset requests', () => {
+        const osmAuthService = {
+            getToken: () => 'token',
+            oauthParam: {
+                dev: { url: 'https://api06.dev.openstreetmap.org' },
+                prod: { url: 'https://api.openstreetmap.org' },
+            },
+        }
+        const configService = { getIsDevServer: () => false }
+
+        it('returns the upload answer as text so it can be saved before parsing', async () => {
+            const answer =
+                '<diffResult><node old_id="-1" new_id="9" new_version="1"/></diffResult>'
+            const http = { post: vi.fn().mockReturnValue(of(answer)) }
+            const service = createService({
+                http,
+                configService,
+                osmAuthService,
+            })
+
+            await expect(
+                firstValueFrom(
+                    service.apiOsmSendOsmDiffFileRaw$('<osmChange/>', '123')
+                )
+            ).resolves.toBe(answer)
+            await expect(
+                firstValueFrom(
+                    service.apiOsmSendOsmDiffFile('<osmChange/>', '123')
+                )
+            ).resolves.toEqual([
+                expect.objectContaining({
+                    osmgoOldId: 'node/-1',
+                    new_version: 1,
+                }),
+            ])
+        })
+
+        it('downloads the osmChange document of a changeset', async () => {
+            const http = { get: vi.fn().mockReturnValue(of('<osmChange/>')) }
+            const service = createService({
+                http,
+                configService,
+                osmAuthService,
+            })
+
+            await expect(
+                firstValueFrom(service.downloadChangeset$('123'))
+            ).resolves.toBe('<osmChange/>')
+            expect(http.get).toHaveBeenCalledWith(
+                'https://api.openstreetmap.org/api/0.6/changeset/123/download',
+                expect.objectContaining({ responseType: 'text' })
+            )
+        })
+
+        it('refuses to download an invalid changeset ID', async () => {
+            const service = createService({
+                http: {},
+                configService,
+                osmAuthService,
+            })
+
+            await expect(
+                firstValueFrom(service.downloadChangeset$('../1'))
+            ).rejects.toThrow('Invalid changeset ID')
+        })
+
+        it('refuses a changeset comment longer than 255 characters', async () => {
+            const http = { put: vi.fn() }
+            const service = createService({
+                http,
+                configService: {
+                    ...configService,
+                    getAppFullVersion: () => 'OsmGo',
+                },
+                osmAuthService,
+            })
+
+            await expect(
+                firstValueFrom(service.createOSMChangeSet('x'.repeat(256)))
+            ).rejects.toThrow('longer than 255')
+            expect(http.put).not.toHaveBeenCalled()
         })
     })
 })

@@ -6,6 +6,25 @@ import {
 
 export const OSM_STATE_STORAGE_KEY = 'osmState'
 export const OSM_STATE_SCHEMA_VERSION = 2
+/**
+ * Stored layout since schema 3: the `osmState` key only holds the head (the
+ * pending queue, the upload journal and the few official objects changed
+ * since the last download), and the downloaded official data lives in one of
+ * two slots. A download fills the slot the head does not use, then the head
+ * switches to it in a single write, so a crash never mixes two downloads.
+ */
+export const OSM_STATE_HEAD_SCHEMA_VERSION = 3
+export const OSM_OFFICIAL_SLOT_KEYS = {
+    a: 'osmStateOfficial:a',
+    b: 'osmStateOfficial:b',
+} as const
+export type OsmOfficialSlot = keyof typeof OSM_OFFICIAL_SLOT_KEYS
+/** Every key that holds part of the OSM state. */
+export const OSM_STATE_STORAGE_KEYS = [
+    OSM_STATE_STORAGE_KEY,
+    OSM_OFFICIAL_SLOT_KEYS.a,
+    OSM_OFFICIAL_SLOT_KEYS.b,
+]
 
 export interface PersistedUploadSummary {
     Total: number
@@ -69,6 +88,33 @@ export interface PersistedOsmStateV2 {
     uploadJournal?: PersistedUploadJournal
 }
 
+/** Official objects changed since the slot was written; `null` removes one. */
+export type PersistedOfficialDelta = Record<string, OsmGoFeature | null>
+
+export interface PersistedOfficialReference {
+    /** `null` while nothing was downloaded: the official base is empty. */
+    slot: OsmOfficialSlot | null
+    revision: number
+    delta: PersistedOfficialDelta
+}
+
+export interface PersistedOsmStateHead {
+    schemaVersion: 3
+    revision: number
+    pendingById: Record<string, OsmGoFeature>
+    nextTemporaryId: number
+    uploadJournal?: PersistedUploadJournal
+    official: PersistedOfficialReference
+}
+
+export interface PersistedOfficialData {
+    schemaVersion: 3
+    /** Must equal `official.revision` of the head that references it. */
+    revision: number
+    officialById: Record<string, OsmGoFeature>
+    bbox: OsmGoFeatureCollection
+}
+
 export interface PersistedOsmStateV1 {
     schemaVersion: 1
     revision?: number
@@ -77,6 +123,19 @@ export interface PersistedOsmStateV1 {
     geojsonBbox?: OsmGoFeatureCollection
     nextFeatureId?: number
     uploadJournal?: PersistedUploadJournal
+}
+
+export class OsmStateConflictError extends Error {
+    readonly name = 'OsmStateConflictError'
+
+    constructor(
+        readonly localRevision: number,
+        readonly storedRevision: number | undefined
+    ) {
+        super(
+            'The OSM state was changed by another window. Reload the application before editing.'
+        )
+    }
 }
 
 export class OsmStatePersistenceError extends Error {
@@ -422,6 +481,146 @@ export const migrateLegacyOsmState = (
     }
 }
 
+const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error)
+
+const readLegacyId = (value: unknown): string => {
+    if (isRecord(value) && value['id'] !== undefined && value['id'] !== null) {
+        return String(value['id'])
+    }
+    return '(no id)'
+}
+
+/**
+ * Migrates V1 collections one object at a time: an object that cannot be
+ * validated is set aside, with its raw value, instead of failing the whole
+ * migration. Ignored official objects are re-downloadable; invalid pending
+ * objects are the user's own edits and must stay exportable.
+ */
+export const migrateLegacyOsmStateWithQuarantine = (
+    legacy: LegacyOsmState
+): { state: PersistedOsmStateV2; quarantined: QuarantinedOsmFeature[] } => {
+    const quarantined: QuarantinedOsmFeature[] = []
+    const readFeatures = (
+        value: unknown,
+        store: 'official' | 'pending'
+    ): unknown[] => {
+        if (value === null || value === undefined) return []
+        if (
+            !isRecord(value) ||
+            value['type'] !== 'FeatureCollection' ||
+            !Array.isArray(value['features'])
+        ) {
+            quarantined.push({
+                store,
+                id: '(collection)',
+                value: structuredClone(value),
+                reason: `The persisted ${store} data is not a feature collection.`,
+            })
+            return []
+        }
+        return value['features']
+    }
+
+    const officialById: Record<string, OsmGoFeature> = {}
+    for (const raw of readFeatures(legacy.geojson, 'official')) {
+        try {
+            const feature = structuredClone(raw) as OsmGoFeature
+            const id = requireFeatureId(feature, 'official data')
+            if (officialById[id]) {
+                throw new Error(
+                    'The persisted official data has duplicate IDs.'
+                )
+            }
+            feature.id = id
+            officialById[id] = requireOsmGoFeature(
+                feature,
+                `official data ${id}`,
+                'official'
+            )
+        } catch (error) {
+            quarantined.push({
+                store: 'official',
+                id: readLegacyId(raw),
+                value: structuredClone(raw),
+                reason: describeError(error),
+            })
+        }
+    }
+
+    const pendingCandidates = readFeatures(legacy.geojsonChanged, 'pending')
+    const negativeIds = pendingCandidates
+        .map((feature) =>
+            isRecord(feature) && isRecord(feature['properties'])
+                ? feature['properties']['id']
+                : undefined
+        )
+        .filter((id): id is number => Number.isInteger(id) && Number(id) < 0)
+    let nextTemporaryId =
+        negativeIds.length > 0 ? Math.min(...negativeIds) - 1 : -1
+    const pendingById: Record<string, OsmGoFeature> = {}
+    for (const raw of pendingCandidates) {
+        try {
+            const feature = structuredClone(raw) as OsmGoFeature
+            let id = requireFeatureId(feature, 'pending data')
+            if (
+                feature.properties?.changeType === 'Create' &&
+                (!Number.isInteger(feature.properties.id) ||
+                    feature.properties.id >= 0)
+            ) {
+                feature.properties.id = nextTemporaryId--
+                id = `${feature.properties.type}/${feature.properties.id}`
+            }
+            if (pendingById[id]) {
+                throw new Error('The persisted pending data has duplicate IDs.')
+            }
+            feature.id = id
+            pendingById[id] = requireOsmGoFeature(
+                feature,
+                `pending data ${id}`,
+                'pending'
+            )
+        } catch (error) {
+            quarantined.push({
+                store: 'pending',
+                id: readLegacyId(raw),
+                value: structuredClone(raw),
+                reason: describeError(error),
+            })
+        }
+    }
+    for (const id of Object.keys(pendingById)) delete officialById[id]
+
+    let bbox: OsmGoFeatureCollection = emptyFeatureCollection()
+    if (legacy.geojsonBbox !== null && legacy.geojsonBbox !== undefined) {
+        try {
+            bbox = requireGeometryFeatureCollection(
+                requireFeatureCollection(legacy.geojsonBbox, 'bbox data'),
+                'persisted bbox data'
+            )
+        } catch (error) {
+            quarantined.push({
+                store: 'bbox',
+                id: '(bbox)',
+                value: structuredClone(legacy.geojsonBbox),
+                reason: describeError(error),
+            })
+        }
+    }
+
+    return {
+        state: {
+            schemaVersion: OSM_STATE_SCHEMA_VERSION,
+            revision: 0,
+            officialById,
+            pendingById,
+            bbox,
+            nextTemporaryId,
+        },
+        quarantined,
+    }
+}
+
 export const migratePersistedOsmState = (
     value: unknown
 ): PersistedOsmStateV2 => {
@@ -490,10 +689,12 @@ export const migratePersistedOsmState = (
 }
 
 export interface QuarantinedOsmFeature {
-    store: 'official' | 'pending'
+    store: 'official' | 'pending' | 'bbox'
     id: string
     value: unknown
     reason: string
+    quarantinedAt?: string
+    source?: 'v1-migration' | 'persisted-state' | 'upload'
 }
 
 export interface RecoveredPersistedOsmState {
@@ -504,10 +705,39 @@ export interface RecoveredPersistedOsmState {
 export const recoverPersistedOsmState = (
     value: unknown
 ): RecoveredPersistedOsmState => {
+    if (isRecord(value) && value['schemaVersion'] === 1) {
+        const v1 = value as unknown as PersistedOsmStateV1
+        const { state, quarantined } = migrateLegacyOsmStateWithQuarantine({
+            geojson: v1.geojson,
+            geojsonChanged: v1.geojsonChanged,
+            geojsonBbox: v1.geojsonBbox,
+        })
+        state.revision =
+            Number.isInteger(v1.revision) && Number(v1.revision) >= 0
+                ? Number(v1.revision)
+                : 0
+        if (v1.uploadJournal) {
+            state.uploadJournal = requireUploadJournal(v1.uploadJournal)
+            const lockedIds = new Set(state.uploadJournal.submittedIds)
+            if (
+                quarantined.some(
+                    (entry) =>
+                        entry.store === 'pending' && lockedIds.has(entry.id)
+                )
+            ) {
+                throw new Error(
+                    'A pending object locked by an upload journal is invalid.'
+                )
+            }
+        }
+        if (quarantined.length > 0) state.revision++
+        return { state, quarantined }
+    }
     if (!isRecord(value) || value['schemaVersion'] !== 2) {
         return { state: migratePersistedOsmState(value), quarantined: [] }
     }
-    const shallowState = structuredClone(value) as Record<string, unknown>
+    // Every part read below is validated into a new object: no deep copy.
+    const shallowState: Record<string, unknown> = { ...value }
     const journal =
         shallowState['uploadJournal'] === undefined
             ? undefined
@@ -558,12 +788,94 @@ export const recoverPersistedOsmState = (
         })
         delete officialById[id]
     }
+    let bbox = shallowState['bbox']
+    try {
+        requireGeometryFeatureCollection(bbox, 'persisted bbox data')
+    } catch (error) {
+        // Only tells which areas were downloaded: the next download rebuilds it.
+        console.warn('The saved downloaded areas were unreadable.', error)
+        bbox = emptyFeatureCollection()
+    }
     const repaired = {
         ...shallowState,
         officialById,
         pendingById,
+        bbox,
     }
     const state = migratePersistedOsmState(repaired)
     if (quarantined.length > 0) state.revision++
     return { state, quarantined }
+}
+
+export const isPersistedOsmStateHead = (value: unknown): boolean =>
+    isRecord(value) && value['schemaVersion'] === OSM_STATE_HEAD_SCHEMA_VERSION
+
+export const readOfficialReference = (
+    head: unknown
+): PersistedOfficialReference => {
+    const official = isRecord(head) ? head['official'] : undefined
+    if (
+        !isRecord(official) ||
+        (official['slot'] !== null &&
+            !Object.hasOwn(OSM_OFFICIAL_SLOT_KEYS, String(official['slot']))) ||
+        !Number.isInteger(official['revision']) ||
+        !isRecord(official['delta'])
+    ) {
+        throw new Error('The persisted official data reference is invalid.')
+    }
+    return {
+        slot: official['slot'] as OsmOfficialSlot | null,
+        revision: Number(official['revision']),
+        delta: official['delta'] as PersistedOfficialDelta,
+    }
+}
+
+/**
+ * Rebuilds the single-record shape from a head and the official slot it
+ * references. A slot that is missing or belongs to another revision (a crash
+ * between two writes) is dropped: official data can be downloaded again,
+ * while the pending queue and the journal are always read from the head.
+ */
+export const composePersistedOsmState = (
+    head: unknown,
+    officialData: unknown
+): { value: Record<string, unknown>; officialDropped: boolean } => {
+    if (!isPersistedOsmStateHead(head)) {
+        throw new Error('The persisted OSM state is invalid.')
+    }
+    const source = head as Record<string, unknown>
+    const reference = readOfficialReference(source)
+    const slotMatches =
+        isRecord(officialData) &&
+        officialData['revision'] === reference.revision &&
+        isRecord(officialData['officialById'])
+    const officialDropped = reference.slot !== null && !slotMatches
+    const officialById: Record<string, unknown> =
+        reference.slot !== null && slotMatches
+            ? {
+                  ...(officialData['officialById'] as Record<string, unknown>),
+              }
+            : {}
+    for (const [id, feature] of Object.entries(reference.delta)) {
+        if (feature === null) {
+            delete officialById[id]
+        } else {
+            officialById[id] = feature
+        }
+    }
+    const value: Record<string, unknown> = {
+        schemaVersion: OSM_STATE_SCHEMA_VERSION,
+        revision: source['revision'],
+        officialById,
+        pendingById: source['pendingById'],
+        bbox:
+            reference.slot !== null && slotMatches
+                ? officialData['bbox']
+                : emptyFeatureCollection(),
+        nextTemporaryId: source['nextTemporaryId'],
+    }
+    if (source['uploadJournal'] !== undefined) {
+        value['uploadJournal'] = source['uploadJournal']
+    }
+    return { value, officialDropped }
 }

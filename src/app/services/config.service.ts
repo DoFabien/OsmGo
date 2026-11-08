@@ -1,7 +1,7 @@
 import { DOCUMENT } from '@angular/common'
 import { HttpClient } from '@angular/common/http'
-import { inject, Service, signal } from '@angular/core'
-import type { DeviceInfo } from '@capacitor/device'
+import { Injector, inject, Service, signal } from '@angular/core'
+import type { ChangesetBbox } from '@app/utils/changeset-bbox'
 import { environment } from '@environments/environment'
 import { TranslateService } from '@ngx-translate/core'
 import {
@@ -13,10 +13,32 @@ import {
 import type { CountryCode, Iso6391Language } from '@osmgo/type'
 import { AppStorage } from '@services/app-storage.service'
 import type { Basemap } from '@services/basemaps.service'
-import { OSM_STATE_STORAGE_KEY } from '@services/osm-state'
+import { DataService } from '@services/data.service'
 import { TagsService } from '@services/tags.service'
 import { from, type Observable } from 'rxjs'
 import { map } from 'rxjs/operators'
+
+/**
+ * Country used to pick regional tag options: the region of the browser
+ * locale, or the main country of its language when it carries none.
+ */
+export const defaultCountryFromLocale = (
+    languages: readonly string[] = []
+): string => {
+    for (const language of languages) {
+        const region = language.split('-')[1]
+        if (region && /^[A-Za-z]{2}$/.test(region)) return region.toUpperCase()
+    }
+    for (const language of languages) {
+        try {
+            const region = new Intl.Locale(language).maximize().region
+            if (region) return region
+        } catch {
+            // Not a valid BCP 47 tag: try the next preferred language.
+        }
+    }
+    return 'GB'
+}
 
 export interface User {
     uid: string
@@ -29,6 +51,8 @@ export interface Changeset {
     last_changeset_activity: number
     created_at: number
     comment: string
+    /** Area already covered by the uploads sent to this changeset. */
+    bbox?: ChangesetBbox
 }
 
 export interface AppVersion {
@@ -75,12 +99,47 @@ export interface Config {
     limitFeatures: number
 }
 
+/**
+ * The settings kept in the `config` key. The last map view has its own key
+ * and signal: it changes on every map move and must not recompute every
+ * reader of the settings.
+ */
+export type StoredConfig = Omit<Config, 'lastView'>
+
+const LAST_VIEW_STORAGE_KEY = 'lastView'
+
+const readMapView = (value: unknown): Config['lastView'] | undefined => {
+    if (typeof value !== 'object' || value === null) return undefined
+    const view = value as Record<string, unknown>
+    const { lng, lat, zoom, bearing } = view
+    if (
+        typeof lng !== 'number' ||
+        typeof lat !== 'number' ||
+        typeof zoom !== 'number' ||
+        !Number.isFinite(lng) ||
+        !Number.isFinite(lat) ||
+        !Number.isFinite(zoom)
+    ) {
+        return undefined
+    }
+    return {
+        lng,
+        lat,
+        zoom,
+        bearing:
+            typeof bearing === 'number' && Number.isFinite(bearing)
+                ? bearing
+                : 0,
+    }
+}
+
 @Service()
 export class ConfigService {
     readonly localStorage = inject(AppStorage)
     private readonly http = inject(HttpClient)
     private readonly translate = inject(TranslateService)
     private readonly document = inject(DOCUMENT)
+    private readonly injector = inject(Injector)
     private readonly currentZoomState = signal<number | undefined>(undefined)
     readonly currentZoom = this.currentZoomState.asReadonly()
     private readonly userInfoState = signal<User>({
@@ -116,7 +175,6 @@ export class ConfigService {
 
     freezeMapRenderer = false
     platforms: string[] = []
-    deviceInfo: DeviceInfo | undefined
     baseMapSources: Basemap[] | null = null
     selecableLayers: string[] = ['marker', 'marker_changed', 'icon-change']
 
@@ -143,7 +201,7 @@ export class ConfigService {
         ],
     }
 
-    private readonly configState = signal<Config>({
+    private readonly configState = signal<StoredConfig>({
         mapMarginBuffer: 50,
         lockMapHeading: true,
         followPosition: true,
@@ -154,15 +212,16 @@ export class ConfigService {
         changeSetComment: '',
         languageUi: window.navigator.language.split('-')[0] || 'en',
         languageTags: window.navigator.language.split('-')[0] || 'en',
-        countryTags:
-            window.navigator.language && window.navigator.language.split('-')[1]
-                ? window.navigator.language.split('-')[1].toUpperCase()
-                : 'GB',
+        countryTags: defaultCountryFromLocale(
+            window.navigator.languages?.length
+                ? window.navigator.languages
+                : [window.navigator.language]
+        ),
         oldTagsIcon: { display: true, year: 4 },
         displayFixmeIcon: true,
         addSurveyDate: true,
         isDevServer: false,
-        checkedKey: 'survey:date',
+        checkedKey: 'check_date',
         surveyCard: {
             display: 'always',
             year: 4,
@@ -170,12 +229,18 @@ export class ConfigService {
         isSelectableLine: true,
         isSelectablePolygon: false,
         passwordSaved: true,
-        lastView: { lng: -0.127758, lat: 51.507351, zoom: 18, bearing: 0 }, // London
         centerWhenGpsIsReady: true,
         openObjectSheetAsPreview: false,
         limitFeatures: 10000,
     })
     readonly config = this.configState.asReadonly()
+    private readonly lastViewState = signal<Config['lastView']>({
+        lng: -0.127758,
+        lat: 51.507351,
+        zoom: 18,
+        bearing: 0,
+    }) // London
+    readonly lastView = this.lastViewState.asReadonly()
 
     private normalizeBasemap(basemap: Basemap): Basemap {
         if (basemap.id === 'Bing' && basemap.max_zoom !== BING_MAX_ZOOM) {
@@ -200,9 +265,20 @@ export class ConfigService {
 
     geojsonIsLoadedFromCache = false
 
-    private updateConfig(update: Partial<Config>): Promise<unknown> {
+    private storedConfigUnreadable = false
+
+    /**
+     * The stored configuration could not be read: the defaults in use must not
+     * be written over it. Changes stay in memory until the next start.
+     */
+    protectUnreadableStoredConfig(): void {
+        this.storedConfigUnreadable = true
+    }
+
+    private updateConfig(update: Partial<StoredConfig>): Promise<unknown> {
         const config = { ...this.config(), ...update }
         this.configState.set(config)
+        if (this.storedConfigUnreadable) return Promise.resolve(config)
         return this.localStorage.set('config', config)
     }
 
@@ -233,14 +309,21 @@ export class ConfigService {
         id: string,
         createdAt: number,
         lastActivity: number,
-        comment: string
+        comment: string,
+        bbox?: ChangesetBbox
     ): void {
         this.changeset = {
             id,
             last_changeset_activity: lastActivity,
             created_at: createdAt,
             comment,
+            ...(bbox ? { bbox } : {}),
         }
+        this.localStorage.set('changeset', this.changeset)
+    }
+
+    setChangesetBbox(bbox: ChangesetBbox): void {
+        this.changeset = { ...this.changeset, bbox }
         this.localStorage.set('changeset', this.changeset)
     }
 
@@ -286,8 +369,19 @@ export class ConfigService {
     }
 
     loadConfig$(i18nConfig: I18nConfig | undefined): Observable<Config> {
-        return from(this.localStorage.get('config')).pipe(
-            map((d) => {
+        return from(
+            Promise.all([
+                this.localStorage.get('config'),
+                this.localStorage.get(LAST_VIEW_STORAGE_KEY),
+            ])
+        ).pipe(
+            map(([stored, storedLastView]) => {
+                const { lastView: legacyLastView, ...d } = stored ?? {}
+                const savedLastView = readMapView(storedLastView)
+                const lastView =
+                    savedLastView ??
+                    readMapView(legacyLastView) ??
+                    this.lastView()
                 const basemap = this.normalizeBasemap(
                     d?.basemap || this.config().basemap
                 )
@@ -298,9 +392,18 @@ export class ConfigService {
                 )
                     ? requestedUiLanguage
                     : 'en'
+                // V1 saved `survey:date`, its default, and never wrote this
+                // V2 setting: such a config moves once to `check_date`.
+                const savedByV1 =
+                    !!stored && !Object.hasOwn(d, 'openObjectSheetAsPreview')
+                const checkedKey: Config['checkedKey'] =
+                    savedByV1 && d.checkedKey === 'survey:date'
+                        ? 'check_date'
+                        : (d?.checkedKey ?? this.config().checkedKey)
                 const config = {
                     ...this.config(),
                     ...d,
+                    checkedKey,
                     basemap,
                     languageUi,
                     languageTags:
@@ -309,18 +412,30 @@ export class ConfigService {
                         d?.countryTags || this.config().countryTags || 'GB',
                 }
                 this.configState.set(config)
-                if (
-                    !d ||
+                this.lastViewState.set(lastView)
+                this.storedConfigUnreadable = false
+                if (!savedLastView && readMapView(legacyLastView)) {
+                    // The view moves to its own key before the settings drop it.
+                    this.localStorage
+                        .set(LAST_VIEW_STORAGE_KEY, lastView)
+                        .then(() => this.localStorage.set('config', config))
+                        .catch((error: unknown) =>
+                            console.warn('Could not move the map view.', error)
+                        )
+                } else if (
+                    !stored ||
+                    savedByV1 ||
                     basemap !== d.basemap ||
-                    languageUi !== d.languageUi
+                    languageUi !== d.languageUi ||
+                    legacyLastView !== undefined
                 ) {
                     this.localStorage.set('config', config)
                 }
 
-                this.setIsSelectableLine(config.isSelectableLine)
-                this.setIsSelectablePolygon(config.isSelectablePolygon)
+                this.applySelectableLine(config.isSelectableLine)
+                this.applySelectablePolygon(config.isSelectablePolygon)
 
-                return this.config()
+                return { ...this.config(), lastView: this.lastView() }
             })
         )
     }
@@ -457,6 +572,11 @@ export class ConfigService {
 
     applyUiLanguage(lang: string): void {
         this.document.documentElement.lang = lang
+        this.document.documentElement.dir = ['ar', 'he'].includes(
+            lang.split('-')[0].toLowerCase()
+        )
+            ? 'rtl'
+            : 'ltr'
         this.translate.use(lang)
     }
 
@@ -529,8 +649,12 @@ export class ConfigService {
     }
 
     setIsSelectableLine(isSelectableLine: boolean): void {
-        const layers = ['way_line', 'way_line_changed'] // way_line_changed TODO: add properties...
         void this.updateConfig({ isSelectableLine })
+        this.applySelectableLine(isSelectableLine)
+    }
+
+    private applySelectableLine(isSelectableLine: boolean): void {
+        const layers = ['way_line', 'way_line_changed'] // way_line_changed TODO: add properties...
         let newSelectableLayers = this.selecableLayers.filter(
             (l) => !layers.includes(l)
         )
@@ -541,8 +665,12 @@ export class ConfigService {
     }
 
     setIsSelectablePolygon(isSelectablePolygon: boolean): void {
-        const layers = ['way_fill', 'way_fill_changed'] //   TODO: add properties...
         void this.updateConfig({ isSelectablePolygon })
+        this.applySelectablePolygon(isSelectablePolygon)
+    }
+
+    private applySelectablePolygon(isSelectablePolygon: boolean): void {
+        const layers = ['way_fill', 'way_fill_changed'] //   TODO: add properties...
         let newSelectableLayers = this.selecableLayers.filter(
             (l) => !layers.includes(l)
         )
@@ -552,8 +680,16 @@ export class ConfigService {
         this.selecableLayers = [...newSelectableLayers]
     }
 
+    /**
+     * The OSM data of the server being left is set aside first (backed up,
+     * quarantine included, after the running commits): when it cannot be
+     * backed up, this rejects and nothing changes.
+     */
     async switchOsmEnvironment(isDevServer: boolean): Promise<boolean> {
         if (this.config().isDevServer === isDevServer) return isDevServer
+        await this.injector
+            .get(DataService)
+            .resetStoredOsmState({ includeQuarantine: true })
         await this.updateConfig({ isDevServer })
         this.userInfoState.set({ uid: '', display_name: '', connected: false })
         this.changeset = {
@@ -564,10 +700,6 @@ export class ConfigService {
         }
         await Promise.all(
             [
-                'geojson',
-                'geojsonBbox',
-                'geojsonChanged',
-                OSM_STATE_STORAGE_KEY,
                 'user_info',
                 'changeset',
                 'osmToken',
@@ -596,7 +728,19 @@ export class ConfigService {
         void this.updateConfig({ openObjectSheetAsPreview: preview })
     }
 
+    /** Only the view key is written, and only when the view changed. */
     setLastView(lastView: Config['lastView']): void {
-        void this.updateConfig({ lastView })
+        const current = this.lastView()
+        if (
+            current.lng === lastView.lng &&
+            current.lat === lastView.lat &&
+            current.zoom === lastView.zoom &&
+            current.bearing === lastView.bearing
+        ) {
+            return
+        }
+        const view = { ...lastView }
+        this.lastViewState.set(view)
+        void this.localStorage.set(LAST_VIEW_STORAGE_KEY, view)
     }
 }

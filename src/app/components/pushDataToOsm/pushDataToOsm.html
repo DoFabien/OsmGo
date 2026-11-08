@@ -2,7 +2,10 @@
 <div class="upload-overlay" role="status" aria-live="polite">
     @if (!uploadedOk()) {
     <mat-spinner diameter="54"></mat-spinner>
-    <h2>{{ 'SEND_DATA.UPLOADING_DATA_TO_OSM' | translate }}</h2>
+    <h2>
+        {{ (verifying() ? 'SEND_DATA.VERIFYING' :
+        'SEND_DATA.UPLOADING_DATA_TO_OSM') | translate }}
+    </h2>
     <p>{{ 'SEND_DATA.DONT_CLOSE' | translate }}</p>
     } @else {
     <div class="upload-success" aria-hidden="true">
@@ -33,6 +36,74 @@
         <section class="message-card message-card--error" role="alert">
             <mat-icon fontSet="material-symbols-rounded">login</mat-icon>
             <p>{{ 'SEND_DATA.YOU_MUST_BE_LOGGED_IN' | translate }}</p>
+            <button
+                mat-flat-button
+                class="message-action"
+                data-testid="login"
+                type="button"
+                (click)="login()"
+            >
+                {{ 'LOGIN.LOGIN_BUTTON' | translate }}
+            </button>
+        </section>
+        } @if (staleWindow()) {
+        <section
+            class="message-card message-card--error"
+            data-testid="stale-window"
+            role="alert"
+        >
+            <mat-icon fontSet="material-symbols-rounded">sync_problem</mat-icon>
+            <p>{{ 'SEND_DATA.STALE_WINDOW' | translate }}</p>
+            <button
+                mat-flat-button
+                class="message-action"
+                type="button"
+                (click)="reloadApplication()"
+            >
+                {{ 'SEND_DATA.RELOAD' | translate }}
+            </button>
+        </section>
+        } @if (quarantinedCount() > 0) {
+        <section
+            class="message-card message-card--warning"
+            data-testid="quarantine"
+            role="status"
+        >
+            <mat-icon fontSet="material-symbols-rounded">inventory_2</mat-icon>
+            <p>
+                {{ 'SEND_DATA.QUARANTINE_MESSAGE' | translate: { count:
+                quarantinedCount() } }}
+            </p>
+            <div class="message-actions">
+                <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="exportQuarantine()"
+                >
+                    {{ 'SEND_DATA.QUARANTINE_EXPORT' | translate }}
+                </button>
+                <button mat-button type="button" (click)="dismissQuarantine()">
+                    {{ 'SEND_DATA.QUARANTINE_DISMISS' | translate }}
+                </button>
+            </div>
+        </section>
+        } @if (stateBackupCount() > 0) {
+        <section
+            class="message-card message-card--warning"
+            data-testid="state-backups"
+            role="status"
+        >
+            <mat-icon fontSet="material-symbols-rounded">history</mat-icon>
+            <p>{{ 'SEND_DATA.STATE_BACKUP_MESSAGE' | translate }}</p>
+            <div class="message-actions">
+                <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="exportStateBackups()"
+                >
+                    {{ 'SEND_DATA.QUARANTINE_EXPORT' | translate }}
+                </button>
+            </div>
         </section>
         }
 
@@ -96,7 +167,19 @@
                 </div>
                 }
             </dl>
-            @if (uploadError.feature?.properties?.tags) {
+            @if (verificationMessageKey(uploadError.verification); as hint) {
+            <p class="error-hint" data-testid="verification-result">
+                {{ hint | translate }}
+            </p>
+            } @if (confirmationCountdown(); as seconds) {
+            <p class="error-hint" data-testid="verification-countdown">
+                {{ 'SEND_DATA.VERIFICATION_WAIT' | translate: { seconds } }}
+            </p>
+            } @else if (confirmationCountdown() === 0) {
+            <p class="error-hint" data-testid="verification-countdown">
+                {{ 'SEND_DATA.VERIFICATION_CHECK_NOW' | translate }}
+            </p>
+            } @if (uploadError.feature?.properties?.tags) {
             <dl class="error-tags">
                 @for ( item of
                 $safeNavigationMigration(uploadError.feature?.properties?.tags)
@@ -108,14 +191,64 @@
                 } }
             </dl>
             } @if (uploadError.feature) {
-            <button
-                mat-stroked-button
-                type="button"
-                [disabled]="isFeatureLocked(uploadError.feature)"
-                (click)="cancelErrorFeature(uploadError.feature)"
-            >
-                {{ 'SEND_DATA.CANCEL_THIS_CHANGE' | translate }}
-            </button>
+            <div class="recovery-actions">
+                @if (canRebase()) {
+                <button
+                    mat-flat-button
+                    data-testid="rebase-change"
+                    type="button"
+                    [disabled]="rebasing() || isFeatureLocked(uploadError.feature)"
+                    (click)="rebaseErrorFeature(uploadError.feature)"
+                >
+                    <mat-icon fontSet="material-symbols-rounded"
+                        >merge_type</mat-icon
+                    >
+                    {{ 'SEND_DATA.REBASE_CHANGE' | translate }}
+                </button>
+                }
+                <button
+                    mat-stroked-button
+                    data-testid="cancel-change"
+                    type="button"
+                    [disabled]="isFeatureLocked(uploadError.feature)"
+                    (click)="confirmCancelErrorFeature(uploadError.feature)"
+                >
+                    {{ 'SEND_DATA.CANCEL_THIS_CHANGE' | translate }}
+                </button>
+            </div>
+            } @if (rebaseConflict(); as conflict) {
+            <div class="rebase-conflict" data-testid="rebase-conflict">
+                <p>{{ 'SEND_DATA.REBASE_CONFLICT' | translate }}</p>
+                <ul>
+                    @if (conflict.keys.length > 0) {
+                    <li>
+                        {{ 'SEND_DATA.REBASE_CONFLICT_TAGS' | translate: { keys:
+                        conflict.keys.join(', ') } }}
+                    </li>
+                    } @if (conflict.position) {
+                    <li>
+                        {{ 'SEND_DATA.REBASE_CONFLICT_POSITION' | translate }}
+                    </li>
+                    } @if (conflict.structure) {
+                    <li>
+                        {{ 'SEND_DATA.REBASE_CONFLICT_STRUCTURE' | translate }}
+                    </li>
+                    }
+                </ul>
+            </div>
+            } @if (uploadError.recoveryAction === 'reload') {
+            <div class="recovery-actions">
+                <button
+                    mat-flat-button
+                    type="button"
+                    (click)="reloadApplication()"
+                >
+                    <mat-icon fontSet="material-symbols-rounded"
+                        >refresh</mat-icon
+                    >
+                    {{ 'SEND_DATA.RELOAD' | translate }}
+                </button>
+            </div>
             } @if (activeJournal(); as journal) {
             <div class="recovery-actions">
                 @if (uploadError.recoveryAction === 'resumeReconciliation') {
@@ -142,6 +275,7 @@
                 }
                 <button
                     mat-stroked-button
+                    data-testid="export-recovery"
                     type="button"
                     (click)="exportRecoveryBundle()"
                 >
@@ -150,9 +284,22 @@
                     >
                     {{ 'SEND_DATA.EXPORT_RECOVERY' | translate }}
                 </button>
-                @if (journal.phase === 'prepared') {
+                @if (canVerifyAgain()) {
                 <button
                     mat-stroked-button
+                    data-testid="verify-again"
+                    type="button"
+                    (click)="verifyAttempt()"
+                >
+                    <mat-icon fontSet="material-symbols-rounded"
+                        >fact_check</mat-icon
+                    >
+                    {{ 'SEND_DATA.VERIFY_AGAIN' | translate }}
+                </button>
+                } @if (canMarkNotApplied()) {
+                <button
+                    mat-stroked-button
+                    data-testid="mark-not-applied"
                     type="button"
                     (click)="discardPreparedAttempt()"
                 >
@@ -161,7 +308,24 @@
                     >
                     {{ 'SEND_DATA.MARK_NOT_APPLIED' | translate }}
                 </button>
-                }
+                } @if (canMarkApplied()) {
+                <button
+                    mat-stroked-button
+                    data-testid="mark-applied"
+                    type="button"
+                    [disabled]="!recoveryExported()"
+                    (click)="markAttemptAsApplied()"
+                >
+                    <mat-icon fontSet="material-symbols-rounded"
+                        >playlist_remove</mat-icon
+                    >
+                    {{ 'SEND_DATA.MARK_APPLIED' | translate }}
+                </button>
+                @if (!recoveryExported()) {
+                <p class="error-hint">
+                    {{ 'SEND_DATA.MARK_APPLIED_HINT' | translate }}
+                </p>
+                } }
             </div>
             }
         </section>
@@ -176,6 +340,7 @@
                 <textarea
                     matInput
                     rows="3"
+                    [attr.maxlength]="maxCommentLength"
                     [ngModel]="commentChangeset()"
                     (ngModelChange)="commentChangeset.set($event)"
                     [placeholder]="'SEND_DATA.CHANGESET_COMMENT' | translate"
@@ -240,7 +405,7 @@
 
                     <div
                         class="change-symbol"
-                        [style.background-color]="item.properties.hexColor || '#26352f'"
+                        [style.background-color]="item.properties.hexColor || 'var(--osmgo-marker-fallback)'"
                         aria-hidden="true"
                     >
                         <app-icon
@@ -251,8 +416,9 @@
 
                     <div class="change-copy">
                         <strong
-                            >{{ item.properties._name || ('SHARED.UNDEFINED' |
-                            translate) }}</strong
+                            >{{ item.properties._name ||
+                            ('MODAL_SELECTED_ITEM.NO_NAME' | translate)
+                            }}</strong
                         >
                         <span
                             >{{ item.properties.primaryTag.key }}={{
@@ -316,7 +482,7 @@
             mat-flat-button
             data-testid="upload-changes"
             type="button"
-            [disabled]="!configService.userInfo().connected || featuresChanges().length === 0 || uploadInFlight() || !!activeJournal()"
+            [disabled]="!configService.userInfo().connected || featuresChanges().length === 0 || uploadInFlight() || !!activeJournal() || staleWindow()"
             (click)="pushDataToOsm(commentChangeset())"
         >
             <mat-icon fontSet="material-symbols-rounded">cloud_upload</mat-icon>

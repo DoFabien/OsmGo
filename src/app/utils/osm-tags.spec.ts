@@ -1,8 +1,10 @@
 import {
+    findInvalidOsmTag,
     normalizedOsmTagMap,
     normalizeOsmTagKey,
     normalizeOsmTags,
     osmTagMapsEqual,
+    osmTextLength,
     requireValidOsmTag,
 } from './osm-tags'
 
@@ -41,5 +43,37 @@ describe('OSM tag normalization', () => {
         expect(() => requireValidOsmTag('', 'value')).toThrow()
         expect(() => requireValidOsmTag('name', 'bad\u0000value')).toThrow()
         expect(() => requireValidOsmTag('x'.repeat(256), 'value')).toThrow()
+    })
+
+    it.each(['payment:', ' diet: ', ':'])(
+        'refuses the incomplete namespace key %j',
+        (key) => {
+            expect(() => requireValidOsmTag(key, 'cash')).toThrow()
+        }
+    )
+
+    it('counts code points rather than UTF-16 units', () => {
+        expect(osmTextLength('😀'.repeat(255))).toBe(255)
+        expect(requireValidOsmTag('name', '😀'.repeat(255)).value).toHaveLength(
+            510
+        )
+        expect(() => requireValidOsmTag('name', '😀'.repeat(256))).toThrow()
+    })
+
+    it('finds the first tag OpenStreetMap would refuse', () => {
+        expect(findInvalidOsmTag({ name: 'Bench', level: 0 })).toBeUndefined()
+        expect(findInvalidOsmTag({ '': '', x: 'y' })).toBeUndefined()
+        expect(findInvalidOsmTag({ 'payment:': 'cash' })).toEqual({
+            key: 'payment:',
+            reason: 'key',
+        })
+        expect(findInvalidOsmTag({ '': 'orphan value' })).toEqual({
+            key: '',
+            reason: 'key',
+        })
+        expect(findInvalidOsmTag({ inscription: 'x'.repeat(256) })).toEqual({
+            key: 'inscription',
+            reason: 'value',
+        })
     })
 })

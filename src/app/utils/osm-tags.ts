@@ -1,6 +1,10 @@
 import type { Tag } from '@osmgo/type'
 
 export const MAX_OSM_TAG_LENGTH = 255
+export const MAX_CHANGESET_COMMENT_LENGTH = 255
+
+/** OpenStreetMap limits keys, values and changeset tags to 255 characters. */
+export const osmTextLength = (value: string): number => Array.from(value).length
 
 const containsInvalidControlCharacter = (value: string): boolean =>
     Array.from(value).some((character) => {
@@ -63,6 +67,10 @@ export const normalizeEditorTags = (tags: Tag[]): Tag[] =>
         }
     })
 
+/** A key that ends with a namespace separator (`payment:`) is incomplete. */
+export const isIncompleteOsmTagKey = (key: string): boolean =>
+    key.trim().endsWith(':')
+
 export const requireValidOsmTag = (
     keyInput: unknown,
     valueInput: unknown
@@ -72,14 +80,47 @@ export const requireValidOsmTag = (
     if (
         !key ||
         value === undefined ||
-        Array.from(key).length > MAX_OSM_TAG_LENGTH ||
-        Array.from(value).length > MAX_OSM_TAG_LENGTH ||
+        isIncompleteOsmTagKey(key) ||
+        osmTextLength(key) > MAX_OSM_TAG_LENGTH ||
+        osmTextLength(value) > MAX_OSM_TAG_LENGTH ||
         containsInvalidControlCharacter(key) ||
         containsInvalidControlCharacter(value)
     ) {
         throw new Error('Invalid OSM tag key or value.')
     }
     return { key, value }
+}
+
+/**
+ * Returns the first tag that OpenStreetMap would refuse, so an editor can
+ * report it before the change joins the upload queue.
+ */
+export const findInvalidOsmTag = (
+    tags: Record<string, unknown>
+): { key: string; reason: 'key' | 'value' } | undefined => {
+    for (const [keyInput, valueInput] of Object.entries(tags)) {
+        const key = normalizeOsmTagKey(keyInput)
+        const value = normalizeOsmTagValue(valueInput)
+        if (key === undefined) {
+            if (value !== undefined) return { key: keyInput, reason: 'key' }
+            continue
+        }
+        if (
+            isIncompleteOsmTagKey(key) ||
+            osmTextLength(key) > MAX_OSM_TAG_LENGTH ||
+            containsInvalidControlCharacter(key)
+        ) {
+            return { key, reason: 'key' }
+        }
+        if (
+            value !== undefined &&
+            (osmTextLength(value) > MAX_OSM_TAG_LENGTH ||
+                containsInvalidControlCharacter(value))
+        ) {
+            return { key, reason: 'value' }
+        }
+    }
+    return undefined
 }
 
 export const osmTagMapsEqual = (

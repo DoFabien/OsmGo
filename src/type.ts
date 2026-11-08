@@ -111,6 +111,7 @@ export interface PresetOption {
     v: string
     tags?: Record<string, string>
     countryCodes?: string[]
+    excludeCountryCodes?: string[]
     terms?: Record<string, string | string[]>
 }
 
@@ -123,6 +124,8 @@ export interface Preset {
     iDtype?: string
     placeholder?: string
     snake_case?: boolean
+    caseSensitive?: boolean
+    customValues?: boolean
     _id: string
     optionsFromJson?: string
 }
@@ -138,6 +141,14 @@ export interface TagConfig {
     geometry: string[]
     iDRef?: string
     tags: Record<string, string | number>
+    /** iD match score: how strongly the tags identify this category. */
+    matchScore?: number
+    /** Countries where the category applies; everywhere when missing. */
+    countryCodes?: string[]
+    /** Tags written in addition to `tags` when the category is chosen. */
+    addTags?: Record<string, string | number>
+    /** Tags that replace the object's tags when the category is chosen. */
+    replace?: Record<string, string | number>
     moreFields?: string[]
     id: string
     isUserTag?: boolean

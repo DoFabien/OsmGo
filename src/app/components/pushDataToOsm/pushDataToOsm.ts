@@ -8,6 +8,7 @@ import {
     type OnDestroy,
     signal,
 } from '@angular/core'
+import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { MatButtonModule } from '@angular/material/button'
 import { MatDialog } from '@angular/material/dialog'
@@ -16,6 +17,10 @@ import { MatIconModule } from '@angular/material/icon'
 import { MatInputModule } from '@angular/material/input'
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner'
 import { MatSnackBar } from '@angular/material/snack-bar'
+import { MAX_CHANGESET_COMMENT_LENGTH } from '@app/utils/osm-tags'
+import { Capacitor } from '@capacitor/core'
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 import { IconComponent } from '@components/icon/icon.component'
 import {
     ConfirmDialogComponent,
@@ -27,9 +32,11 @@ import type { OsmGoFeature } from '@osmgo/type'
 import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { MapService } from '@services/map.service'
+import { OsmAuthService } from '@services/osm-auth.service'
 import { OverlayNavigationService } from '@services/overlay-navigation.service'
 import { TagsService } from '@services/tags.service'
 import {
+    UploadBusyElsewhereError,
     UploadCoordinatorService,
     type UploadFailure,
     type UploadFailureCode,
@@ -38,18 +45,37 @@ import {
     type UploadSummary,
 } from '@services/upload-coordinator.service'
 import type { Geometry, Position } from 'geojson'
-import { firstValueFrom, timer } from 'rxjs'
-import { take } from 'rxjs/operators'
+import { firstValueFrom, interval, timer } from 'rxjs'
+import { map, take } from 'rxjs/operators'
 
 export const UPLOAD_SUCCESS_DELAY_MS = new InjectionToken<number>(
     'Upload success feedback delay',
     { factory: () => 1000 }
 )
 
+/** Files for the Android WebView, which can neither share nor download. */
+export interface NativeFileExport {
+    isNativePlatform(): boolean
+    filesystem: Pick<typeof Filesystem, 'writeFile'>
+    share: Pick<typeof Share, 'share'>
+}
+
+export const NATIVE_FILE_EXPORT = new InjectionToken<NativeFileExport>(
+    'Native file export',
+    {
+        factory: () => ({
+            isNativePlatform: () => Capacitor.isNativePlatform(),
+            filesystem: Filesystem,
+            share: Share,
+        }),
+    }
+)
+
 @Component({
     selector: 'page-push-data-to-osm',
     templateUrl: './pushDataToOsm.html',
     styleUrls: ['./pushDataToOsm.scss'],
+    host: { '(window:beforeunload)': 'warnBeforeLeaving($event)' },
     imports: [
         FormsModule,
         IconComponent,
@@ -75,23 +101,61 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     private readonly snackBar = inject(MatSnackBar)
     private readonly successDelayMs = inject(UPLOAD_SUCCESS_DELAY_MS)
     private readonly document = inject(DOCUMENT)
+    private readonly osmAuth = inject(OsmAuthService)
+    private readonly nativeFileExport = inject(NATIVE_FILE_EXPORT)
+    private readonly clock = toSignal(
+        interval(1000).pipe(map(() => Date.now())),
+        { initialValue: Date.now() }
+    )
 
-    readonly summary = signal<UploadSummary>({
-        Total: 0,
-        Create: 0,
-        Update: 0,
-        Delete: 0,
-    })
     readonly commentChangeset = signal(this.configService.getChangeSetComment())
+    readonly maxCommentLength = MAX_CHANGESET_COMMENT_LENGTH
     readonly uploadInFlight = this.uploadCoordinator.inFlight
     readonly isPushing = this.uploadInFlight
     readonly uploadStatusVisible = signal(false)
     readonly uploadedOk = computed(
         () => this.uploadCoordinator.state().kind === 'succeeded'
     )
-    readonly featuresChanges = signal<UploadFeature[]>(
-        this.dataService.getGeojsonChanged().features
+    readonly verifying = computed(
+        () => this.uploadCoordinator.state().kind === 'verifying'
     )
+    /** Failure explanations attached to queue entries, by feature id. */
+    private readonly featureErrors = signal<Record<string, string>>({})
+    private readonly failedFeatureId = signal<string | undefined>(undefined)
+    readonly featuresChanges = computed<UploadFeature[]>(() => {
+        const errors = this.featureErrors()
+        const failedId = this.failedFeatureId()
+        const features = this.dataService
+            .changedFeatures()
+            .map((feature): UploadFeature => {
+                const error = errors[String(feature.id)]
+                return error ? { ...feature, error } : feature
+            })
+        const failed = features.find((feature) => feature.id === failedId)
+        return failed
+            ? [failed, ...features.filter((feature) => feature !== failed)]
+            : features
+    })
+    readonly summary = computed<UploadSummary>(() => {
+        const summary: UploadSummary = {
+            Total: 0,
+            Create: 0,
+            Update: 0,
+            Delete: 0,
+        }
+        for (const feature of this.dataService.changedFeatures()) {
+            const changeType = feature.properties.changeType
+            if (
+                changeType === 'Create' ||
+                changeType === 'Update' ||
+                changeType === 'Delete'
+            ) {
+                summary[changeType]++
+            }
+            summary.Total++
+        }
+        return summary
+    })
     private readonly localError = signal<UploadFailure | undefined>(undefined)
     readonly connectionError = computed(() => {
         const state = this.uploadCoordinator.state()
@@ -107,6 +171,7 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     })
     readonly activeJournal = computed(() => {
         this.uploadCoordinator.state()
+        this.dataService.changedFeatures()
         return this.dataService.getUploadJournal()
     })
     readonly changesetInspectionUrl = computed(() => {
@@ -123,11 +188,112 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
             this.activeJournal()?.submittedIds.length ??
             this.featuresChanges().length
     )
+    /** The recovery data was handed to the user: removing the attempt is safe. */
+    readonly recoveryExported = signal(false)
+    readonly rebasing = signal(false)
+    readonly rebaseConflict = signal<
+        { keys: string[]; position: boolean; structure: boolean } | undefined
+    >(undefined)
+    readonly canRebase = computed(() => {
+        const error = this.error()
+        const feature = error?.feature
+        return (
+            error?.code === 'versionConflict' &&
+            feature?.properties.changeType === 'Update'
+        )
+    })
+    /**
+     * Only a check made long enough after the failure, that found nothing,
+     * lets the user call a lost answer "not applied".
+     */
+    readonly canMarkNotApplied = computed(() => {
+        const error = this.error()
+        return (
+            this.activeJournal()?.phase === 'prepared' &&
+            error?.code !== 'receiptNotSaved' &&
+            error?.verification === 'notFound' &&
+            error.notAppliedConfirmed === true
+        )
+    })
+    /** Seconds before a new check can confirm that nothing was applied. */
+    readonly confirmationCountdown = computed(() => {
+        const error = this.error()
+        if (
+            error?.verification !== 'notFound' ||
+            error.notAppliedConfirmed ||
+            !error.confirmationCheckAfter
+        ) {
+            return undefined
+        }
+        const remaining =
+            Date.parse(error.confirmationCheckAfter) - this.clock()
+        return Number.isFinite(remaining)
+            ? Math.max(0, Math.ceil(remaining / 1000))
+            : 0
+    })
+    readonly canVerifyAgain = computed(() => {
+        const error = this.error()
+        return (
+            this.activeJournal()?.phase === 'prepared' &&
+            error?.code !== 'receiptNotSaved' &&
+            !this.uploadInFlight()
+        )
+    })
+    /**
+     * An acknowledged attempt that cannot be reconciled, or a prepared one the
+     * changeset holds only in part (an upload is applied as a whole).
+     */
+    readonly canMarkApplied = computed(() => {
+        const phase = this.activeJournal()?.phase
+        const error = this.error()
+        return (
+            ((phase === 'acknowledged' || phase === 'applied') && !!error) ||
+            (phase === 'prepared' &&
+                error?.verification === 'partial' &&
+                error.code !== 'receiptNotSaved')
+        )
+    })
+    readonly quarantinedCount = this.dataService.quarantinedCount
+    /** Copies of local data set aside by a reset or a change of server. */
+    readonly stateBackupCount = signal(0)
+    readonly staleWindow = this.dataService.externalStateChange
     private destroyed = false
     private closeStarted = false
+    private verificationRequested = false
 
     ngOnDestroy(): void {
         this.destroyed = true
+        this.persistComment()
+    }
+
+    ngAfterViewInit(): void {
+        void this.verifyAfterRestart()
+        void this.loadStateBackupCount()
+    }
+
+    private async loadStateBackupCount(): Promise<void> {
+        try {
+            const backups = await this.dataService.getStateBackups()
+            this.stateBackupCount.set(backups.length)
+        } catch (error) {
+            console.warn('Could not read the local data backups.', error)
+        }
+    }
+
+    async exportStateBackups(): Promise<void> {
+        let backups: unknown[]
+        try {
+            backups = await this.dataService.getStateBackups()
+        } catch (error) {
+            console.error('Could not read the local data backups.', error)
+            this.displayError(this.translate.instant('SEND_DATA.EXPORT_FAILED'))
+            return
+        }
+        await this.exportJsonFile('osmgo-local-data-backups.json', {
+            exportedAt: new Date().toISOString(),
+            note: 'Local OpenStreetMap data set aside by a reset or a change of server. Each entry keeps the stored values as they were.',
+            backups,
+        })
     }
 
     back(): void {
@@ -138,24 +304,26 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         return !this.uploadInFlight()
     }
 
+    /** Warns before a reload or tab close would cut a running upload. */
+    warnBeforeLeaving(event: BeforeUnloadEvent): void {
+        if (!this.uploadInFlight()) return
+        event.preventDefault()
+        event.returnValue = ''
+    }
+
     presentConfirm(): void {
-        const data: ConfirmDialogData = {
-            title: this.translate.instant('SEND_DATA.DELETE_CONFIRM_HEADER'),
-            message: this.translate.instant('SEND_DATA.DELETE_CONFIRM_MESSAGE'),
-            cancelLabel: this.translate.instant('SHARED.CANCEL'),
-            confirmLabel: this.translate.instant('SHARED.CONFIRM'),
-            destructive: true,
-        }
-        this.dialog
-            .open(ConfirmDialogComponent, {
-                data,
-                maxWidth: 'calc(100vw - 32px)',
-                panelClass: 'osmgo-dialog',
-            })
-            .afterClosed()
-            .subscribe((confirmed) => {
-                if (confirmed) void this.cancelAllFeatures()
-            })
+        const count = this.featuresChanges().length
+        void this.confirm({
+            title: 'SEND_DATA.DELETE_CONFIRM_HEADER',
+            message:
+                count === 1
+                    ? 'SEND_DATA.DELETE_CONFIRM_MESSAGE_ONE'
+                    : 'SEND_DATA.DELETE_CONFIRM_MESSAGE',
+            messageParams: { count },
+            confirmLabel: 'SHARED.CONFIRM',
+        }).then((confirmed) => {
+            if (confirmed) void this.cancelAllFeatures()
+        })
     }
 
     displayError(error: string): void {
@@ -165,17 +333,40 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         })
     }
 
+    login(): void {
+        this.persistComment()
+        this.osmAuth.login().subscribe({
+            error: (error) => {
+                console.error('Unable to start login.', error)
+                this.displayError(
+                    this.translate.instant('SEND_DATA.ERRORS.LOGIN_FAILED')
+                )
+            },
+        })
+    }
+
+    reloadApplication(): void {
+        this.document.defaultView?.location.reload()
+    }
+
     failureMessageKey(code: UploadFailureCode): string {
         const keys: Record<UploadFailureCode, string> = {
             emptyQueue: 'SEND_DATA.ERRORS.EMPTY_QUEUE',
             invalidQueue: 'SEND_DATA.ERRORS.INVALID_QUEUE',
+            commentTooLong: 'SEND_DATA.ERRORS.COMMENT_TOO_LONG',
             connection: 'SEND_DATA.ERRORS.CONNECTION',
             authentication: 'SEND_DATA.ERRORS.AUTHENTICATION',
+            forbidden: 'SEND_DATA.ERRORS.FORBIDDEN',
             changesetClosed: 'SEND_DATA.ERRORS.CHANGESET_CLOSED',
             changeset: 'SEND_DATA.ERRORS.CHANGESET',
             journal: 'SEND_DATA.ERRORS.JOURNAL',
             uploadRejected: 'SEND_DATA.ERRORS.UPLOAD_REJECTED',
+            versionConflict: 'SEND_DATA.ERRORS.VERSION_CONFLICT',
+            nodeStillReferenced: 'SEND_DATA.ERRORS.NODE_STILL_REFERENCED',
             uploadUncertain: 'SEND_DATA.ERRORS.UPLOAD_UNCERTAIN',
+            uploadElsewhere: 'SEND_DATA.ERRORS.UPLOAD_ELSEWHERE',
+            staleState: 'SEND_DATA.ERRORS.STALE_STATE',
+            receiptNotSaved: 'SEND_DATA.ERRORS.RECEIPT_NOT_SAVED',
             reconciliation: 'SEND_DATA.ERRORS.RECONCILIATION',
             recoveryRequired: 'SEND_DATA.ERRORS.RECOVERY_REQUIRED',
             legacyJournal: 'SEND_DATA.ERRORS.LEGACY_JOURNAL',
@@ -191,62 +382,56 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
             editQueue: 'SEND_DATA.RECOVERY.ACTIONS.EDIT_QUEUE',
             reconnect: 'SEND_DATA.RECOVERY.ACTIONS.RECONNECT',
             reauthenticate: 'SEND_DATA.RECOVERY.ACTIONS.REAUTHENTICATE',
+            checkAccount: 'SEND_DATA.RECOVERY.ACTIONS.CHECK_ACCOUNT',
             createChangeset: 'SEND_DATA.RECOVERY.ACTIONS.CREATE_CHANGESET',
             inspectServer: 'SEND_DATA.RECOVERY.ACTIONS.INSPECT_SERVER',
             resumeReconciliation:
                 'SEND_DATA.RECOVERY.ACTIONS.RESUME_RECONCILIATION',
+            reload: 'SEND_DATA.RECOVERY.ACTIONS.RELOAD',
             retry: 'SEND_DATA.RECOVERY.ACTIONS.RETRY',
         }
         return keys[action]
     }
 
+    verificationMessageKey(
+        verification: UploadFailure['verification']
+    ): string | undefined {
+        switch (verification) {
+            case 'notFound':
+                return 'SEND_DATA.VERIFICATION_NOT_FOUND'
+            case 'unavailable':
+                return 'SEND_DATA.VERIFICATION_UNAVAILABLE'
+            case 'partial':
+                return 'SEND_DATA.VERIFICATION_PARTIAL'
+            default:
+                return undefined
+        }
+    }
+
     getSummary(): UploadSummary {
-        const summary: UploadSummary = {
-            Total: 0,
-            Create: 0,
-            Update: 0,
-            Delete: 0,
-        }
-        const features = this.dataService.getGeojsonChanged().features
-        this.featuresChanges.set(features)
-        for (const feature of features) {
-            const changeType = feature.properties.changeType
-            if (
-                changeType === 'Create' ||
-                changeType === 'Update' ||
-                changeType === 'Delete'
-            ) {
-                summary[changeType]++
-            }
-            summary.Total++
-        }
-        return summary
+        return this.summary()
     }
 
     async pushDataToOsm(commentChangeset: string): Promise<void> {
         if (this.uploadInFlight()) return
 
         this.localError.set(undefined)
+        this.rebaseConflict.set(undefined)
+        this.featureErrors.set({})
+        this.failedFeatureId.set(undefined)
         this.uploadStatusVisible.set(true)
         const state = await this.uploadCoordinator.start(commentChangeset)
-        this.featuresChanges.set(this.dataService.getGeojsonChanged().features)
-        this.summary.set(this.getSummary())
 
         if (state.kind === 'failed') {
             this.uploadStatusVisible.set(false)
             const failedFeature = state.error.feature
             if (failedFeature) {
-                this.featuresChanges.set([
-                    {
-                        ...failedFeature,
-                        error: this.translate.instant(
-                            this.failureMessageKey(state.error.code)
-                        ),
-                    },
-                    ...this.featuresChanges().filter(
-                        (feature) => feature.id !== failedFeature.id
-                    ),
-                ])
+                this.markFeatureError(
+                    String(failedFeature.id),
+                    this.translate.instant(
+                        this.failureMessageKey(state.error.code)
+                    )
+                )
             }
             return
         }
@@ -255,6 +440,22 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         await firstValueFrom(timer(this.successDelayMs).pipe(take(1)))
         this.uploadStatusVisible.set(false)
         if (!this.destroyed) await this.closeOverlayOnce()
+    }
+
+    confirmCancelErrorFeature(feature: OsmGoFeature): void {
+        const message =
+            feature.properties.changeType === 'Create'
+                ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_CREATED'
+                : feature.properties.changeType === 'Delete'
+                  ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_DELETED'
+                  : 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE'
+        void this.confirm({
+            title: 'MAIN.SELECTION.REVERT_LOCAL_TITLE',
+            message,
+            confirmLabel: 'MAIN.SELECTION.REVERT_LOCAL',
+        }).then((confirmed) => {
+            if (confirmed) void this.cancelErrorFeature(feature)
+        })
     }
 
     async cancelErrorFeature(feature: OsmGoFeature): Promise<void> {
@@ -266,7 +467,53 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         }
         this.refreshMapAndQueue()
         this.localError.set(undefined)
+        this.rebaseConflict.set(undefined)
         this.uploadCoordinator.resetTerminalState()
+    }
+
+    /**
+     * Re-applies a change that lost a version conflict on top of the current
+     * OpenStreetMap version. Overlapping edits are reported, never merged.
+     */
+    async rebaseErrorFeature(feature: OsmGoFeature): Promise<void> {
+        if (this.rebasing()) return
+        this.rebasing.set(true)
+        this.rebaseConflict.set(undefined)
+        try {
+            const outcome = await this.uploadCoordinator.rebasePendingFeature(
+                String(feature.id)
+            )
+            switch (outcome.kind) {
+                case 'rebased':
+                case 'upToDate':
+                    this.refreshMapAndQueue()
+                    this.localError.set(undefined)
+                    this.uploadCoordinator.resetTerminalState()
+                    this.notify(
+                        outcome.kind === 'rebased'
+                            ? 'SEND_DATA.REBASE_DONE'
+                            : 'SEND_DATA.REBASE_UP_TO_DATE'
+                    )
+                    break
+                case 'gone':
+                    this.notify('SEND_DATA.REBASE_GONE')
+                    break
+                case 'conflict':
+                    this.rebaseConflict.set({
+                        keys: outcome.conflicts.map(({ key }) => key),
+                        position: outcome.position,
+                        structure: outcome.structure,
+                    })
+                    break
+                default:
+                    this.notify('SEND_DATA.REBASE_FAILED')
+            }
+        } catch (error) {
+            console.error('Unable to rebase the pending change.', error)
+            this.notify('SEND_DATA.REBASE_FAILED')
+        } finally {
+            this.rebasing.set(false)
+        }
     }
 
     isFeatureLocked(feature: OsmGoFeature): boolean {
@@ -282,59 +529,190 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         const state = await this.uploadCoordinator.resumeReconciliation()
         this.uploadStatusVisible.set(false)
         this.refreshMapAndQueue()
-        this.summary.set(this.getSummary())
         if (state.kind === 'succeeded') {
-            this.snackBar.open(
-                this.translate.instant('SEND_DATA.RECONCILIATION_COMPLETE'),
-                this.translate.instant('SHARED.CLOSE'),
-                { duration: 5000 }
-            )
+            this.notify('SEND_DATA.RECONCILIATION_COMPLETE')
         }
+    }
+
+    /** Asks OpenStreetMap whether the lost attempt was applied after all. */
+    async verifyAttempt(): Promise<void> {
+        if (this.uploadInFlight()) return
+        this.localError.set(undefined)
+        this.uploadStatusVisible.set(true)
+        try {
+            const state = await this.uploadCoordinator.verifyPreparedAttempt()
+            this.refreshMapAndQueue()
+            if (state.kind === 'succeeded') {
+                this.notify('SEND_DATA.RECONCILIATION_COMPLETE')
+            }
+        } finally {
+            this.uploadStatusVisible.set(false)
+        }
+    }
+
+    /**
+     * After a restart, a prepared journal means an answer was lost: look it up
+     * on the changeset before offering any way out.
+     */
+    private async verifyAfterRestart(): Promise<void> {
+        if (
+            this.verificationRequested ||
+            this.activeJournal()?.phase !== 'prepared' ||
+            this.error()?.verification ||
+            this.uploadInFlight()
+        ) {
+            return
+        }
+        this.verificationRequested = true
+        await this.verifyAttempt()
     }
 
     discardPreparedAttempt(): void {
-        const data: ConfirmDialogData = {
-            title: this.translate.instant(
-                'SEND_DATA.DISCARD_ATTEMPT_CONFIRM_HEADER'
-            ),
-            message: this.translate.instant(
-                'SEND_DATA.DISCARD_ATTEMPT_CONFIRM_MESSAGE'
-            ),
-            cancelLabel: this.translate.instant('SHARED.CANCEL'),
-            confirmLabel: this.translate.instant('SHARED.CONFIRM'),
-            destructive: true,
-        }
-        this.dialog
-            .open(ConfirmDialogComponent, {
-                data,
-                maxWidth: 'calc(100vw - 32px)',
-                panelClass: 'osmgo-dialog',
-            })
-            .afterClosed()
-            .subscribe((confirmed) => {
-                if (confirmed) void this.confirmDiscardPreparedAttempt()
-            })
+        void this.confirm({
+            title: 'SEND_DATA.DISCARD_ATTEMPT_CONFIRM_HEADER',
+            message: 'SEND_DATA.DISCARD_ATTEMPT_CONFIRM_MESSAGE',
+            confirmLabel: 'SHARED.CONFIRM',
+        }).then((confirmed) => {
+            if (confirmed) void this.confirmDiscardPreparedAttempt()
+        })
     }
 
-    exportRecoveryBundle(): void {
+    /** Removes an unreconcilable attempt from the queue, once exported. */
+    markAttemptAsApplied(): void {
+        if (!this.recoveryExported() || !this.canMarkApplied()) return
+        const prepared = this.activeJournal()?.phase === 'prepared'
+        void this.confirm({
+            title: 'SEND_DATA.MARK_APPLIED_CONFIRM_HEADER',
+            message: 'SEND_DATA.MARK_APPLIED_CONFIRM_MESSAGE',
+            confirmLabel: 'SHARED.CONFIRM',
+        }).then(async (confirmed) => {
+            if (!confirmed) return
+            try {
+                await (prepared
+                    ? this.uploadCoordinator.markPartialAttemptAsApplied()
+                    : this.uploadCoordinator.markAcknowledgedAttemptAsApplied())
+            } catch (error) {
+                this.setLocalError(error)
+                return
+            }
+            this.localError.set(undefined)
+            this.refreshMapAndQueue()
+            this.notify('SEND_DATA.ATTEMPT_ABANDONED')
+        })
+    }
+
+    async exportRecoveryBundle(): Promise<void> {
         const journal = this.activeJournal()
         if (!journal) return
-        const bundle = {
+        const unsaved = this.uploadCoordinator.getUnsavedReceipt()
+        const exported = await this.exportJsonFile(
+            `osmgo-upload-recovery-${journal.attemptId}.json`,
+            {
+                exportedAt: new Date().toISOString(),
+                journal,
+                ...(unsaved ? { unsavedServerAnswer: unsaved } : {}),
+                currentPendingFeatures:
+                    this.dataService.getGeojsonChanged().features,
+            }
+        )
+        if (exported) this.recoveryExported.set(true)
+    }
+
+    async exportQuarantine(): Promise<void> {
+        const features = await this.dataService.getQuarantinedFeatures()
+        await this.exportJsonFile('osmgo-unreadable-objects.json', {
             exportedAt: new Date().toISOString(),
-            journal,
-            currentPendingFeatures:
-                this.dataService.getGeojsonChanged().features,
+            note: 'Objects that could not be read and were set aside. Each entry keeps its raw value.',
+            features,
+        })
+    }
+
+    dismissQuarantine(): void {
+        void this.confirm({
+            title: 'SEND_DATA.QUARANTINE_DISMISS_CONFIRM_HEADER',
+            message: 'SEND_DATA.QUARANTINE_DISMISS_CONFIRM_MESSAGE',
+            confirmLabel: 'SHARED.CONFIRM',
+        }).then(async (confirmed) => {
+            if (confirmed) await this.dataService.clearQuarantine()
+        })
+    }
+
+    /**
+     * Hands a JSON file to the user: the system share sheet in the Android
+     * application, the browser share sheet where it can share files, a
+     * download link elsewhere. Resolves to false when nothing was exported,
+     * including a share sheet the user closed.
+     */
+    private async exportJsonFile(
+        fileName: string,
+        data: unknown
+    ): Promise<boolean> {
+        const json = JSON.stringify(data, null, 2)
+        if (this.nativeFileExport.isNativePlatform()) {
+            return this.shareNativeFile(fileName, json)
         }
-        const url = URL.createObjectURL(
-            new Blob([JSON.stringify(bundle, null, 2)], {
+        const view = this.document.defaultView
+        try {
+            const file = new File([json], fileName, {
                 type: 'application/json',
             })
-        )
-        const link = this.document.createElement('a')
-        link.href = url
-        link.download = `osmgo-upload-recovery-${journal.attemptId}.json`
-        link.click()
-        URL.revokeObjectURL(url)
+            const navigator = view?.navigator
+            if (navigator?.share && navigator.canShare?.({ files: [file] })) {
+                await navigator.share({ files: [file], title: fileName })
+                return true
+            }
+        } catch (error) {
+            if ((error as { name?: unknown })?.name === 'AbortError') {
+                return false
+            }
+            console.warn('Sharing failed, downloading instead.', error)
+        }
+        try {
+            const url = URL.createObjectURL(
+                new Blob([json], { type: 'application/json' })
+            )
+            const link = this.document.createElement('a')
+            link.href = url
+            link.download = fileName
+            link.click()
+            // Some WebViews read the blob after the click: revoke it later.
+            view?.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+            return true
+        } catch (error) {
+            console.error('The file could not be exported.', error)
+            this.displayError(this.translate.instant('SEND_DATA.EXPORT_FAILED'))
+            return false
+        }
+    }
+
+    private async shareNativeFile(
+        fileName: string,
+        json: string
+    ): Promise<boolean> {
+        let uri: string
+        try {
+            ;({ uri } = await this.nativeFileExport.filesystem.writeFile({
+                path: fileName,
+                data: json,
+                directory: Directory.Cache,
+                encoding: Encoding.UTF8,
+            }))
+        } catch (error) {
+            console.error('The file could not be written.', error)
+            this.displayError(this.translate.instant('SEND_DATA.EXPORT_FAILED'))
+            return false
+        }
+        try {
+            await this.nativeFileExport.share.share({
+                title: fileName,
+                files: [uri],
+            })
+            return true
+        } catch (error) {
+            // Android rejects a share sheet closed without choosing a target.
+            console.warn('The file was not shared.', error)
+            return false
+        }
     }
 
     async cancelAllFeatures(): Promise<void> {
@@ -345,29 +723,26 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
             return
         }
         this.refreshMapAndQueue()
-        this.summary.set(this.getSummary())
         this.localError.set(undefined)
         this.uploadCoordinator.resetTerminalState()
         this.back()
     }
 
     centerToElement(geometry: OsmGoFeature['geometry']): void {
+        this.persistComment()
         if (geometry.type === 'Point') {
             const [longitude, latitude] = geometry.coordinates
             if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
                 return
             }
-            if (this.mapService.map.getZoom() < 18.5) {
-                this.mapService.map.setZoom(18.5)
-            }
-            this.mapService.map.setCenter([longitude, latitude])
+            this.mapService.focusOn({
+                center: [longitude, latitude],
+                zoom: Math.max(this.mapService.map.getZoom(), 18.5),
+            })
         } else {
             const bounds = this.geometryBounds(geometry)
             if (!bounds) return
-            this.mapService.map.fitBounds(bounds, {
-                maxZoom: 18.5,
-                padding: 48,
-            })
+            this.mapService.focusOn({ bounds, padding: 48 })
         }
         this.back()
     }
@@ -423,8 +798,55 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         ]
     }
 
-    ngAfterViewInit(): void {
-        this.summary.set(this.getSummary())
+    private persistComment(): void {
+        const comment = this.commentChangeset()
+        if (comment !== this.configService.getChangeSetComment()) {
+            this.configService.setChangeSetComment(comment)
+        }
+    }
+
+    private markFeatureError(featureId: string, error: string): void {
+        this.featureErrors.update((errors) => ({
+            ...errors,
+            [featureId]: error,
+        }))
+        this.failedFeatureId.set(featureId)
+    }
+
+    private notify(messageKey: string): void {
+        this.snackBar.open(
+            this.translate.instant(messageKey),
+            this.translate.instant('SHARED.CLOSE'),
+            { duration: 6000 }
+        )
+    }
+
+    private async confirm(options: {
+        title: string
+        message: string
+        messageParams?: Record<string, unknown>
+        confirmLabel: string
+    }): Promise<boolean> {
+        const data: ConfirmDialogData = {
+            title: this.translate.instant(options.title),
+            message: this.translate.instant(
+                options.message,
+                options.messageParams
+            ),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant(options.confirmLabel),
+            destructive: true,
+        }
+        const confirmed = await firstValueFrom(
+            this.dialog
+                .open(ConfirmDialogComponent, {
+                    data,
+                    maxWidth: 'calc(100vw - 32px)',
+                    panelClass: 'osmgo-dialog',
+                })
+                .afterClosed()
+        )
+        return !!confirmed
     }
 
     private setLocalError(
@@ -449,7 +871,10 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
                     : 'The local changes could not be updated.'
         this.localError.set({
             status: typeof details.status === 'number' ? details.status : 0,
-            code: 'localChange',
+            code:
+                error instanceof UploadBusyElsewhereError
+                    ? 'uploadElsewhere'
+                    : 'localChange',
             technicalMessage: message,
             feature,
             queuePreserved: true,
@@ -461,7 +886,6 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     }
 
     private refreshMapAndQueue(): void {
-        this.featuresChanges.set(this.dataService.getGeojsonChanged().features)
         this.mapService.redrawMarkers(this.dataService.getGeojson())
         this.mapService.redrawChangedMarkers(
             this.dataService.getGeojsonChanged()
@@ -477,7 +901,6 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         }
         this.localError.set(undefined)
         this.refreshMapAndQueue()
-        this.summary.set(this.getSummary())
     }
 
     private async closeOverlayOnce(): Promise<void> {

@@ -2,7 +2,9 @@ import type { OsmGoFeature, OsmGoFeatureCollection } from '@osmgo/type'
 import {
     createEmptyOsmState,
     migrateLegacyOsmState,
+    migrateLegacyOsmStateWithQuarantine,
     migratePersistedOsmState,
+    recoverPersistedOsmState,
 } from './osm-state'
 
 const feature = (
@@ -230,4 +232,145 @@ describe('OsmState migrations', () => {
             expect(second.nextTemporaryId).toBe(expectedNextId)
         }
     )
+
+    describe('legacy migration with per-object quarantine', () => {
+        const brokenGeometry = (id: number, changeType?: 'Update') => {
+            const broken = feature(id, changeType)
+            broken.geometry = {
+                type: 'Point',
+                coordinates: [Number.POSITIVE_INFINITY, 48],
+            }
+            return broken
+        }
+
+        it('keeps valid V1 objects when others are invalid', () => {
+            const legacy = {
+                geojson: collection([
+                    feature(10),
+                    brokenGeometry(11),
+                    feature(12),
+                ]),
+                geojsonChanged: collection([
+                    feature(20, 'Update'),
+                    brokenGeometry(21, 'Update'),
+                    feature(0, 'Create'),
+                ]),
+                geojsonBbox: collection([]),
+            }
+            const original = structuredClone(legacy)
+
+            const { state, quarantined } =
+                migrateLegacyOsmStateWithQuarantine(legacy)
+
+            expect(() => migrateLegacyOsmState(legacy)).toThrow()
+            expect(Object.keys(state.officialById)).toEqual([
+                'node/10',
+                'node/12',
+            ])
+            expect(Object.keys(state.pendingById).sort()).toEqual([
+                'node/-1',
+                'node/20',
+            ])
+            expect(state.nextTemporaryId).toBe(-2)
+            expect(
+                quarantined.map(({ store, id }) => `${store}:${id}`).sort()
+            ).toEqual(['official:node/11', 'pending:node/21'])
+            expect(quarantined[0].value).toEqual(legacy.geojson.features[1])
+            expect(legacy).toEqual(original)
+        })
+
+        it('sets aside a value that is not a feature collection', () => {
+            const { state, quarantined } = migrateLegacyOsmStateWithQuarantine({
+                geojson: 'corrupted' as never,
+                geojsonChanged: collection([feature(5, 'Update')]),
+                geojsonBbox: { type: 'FeatureCollection' } as never,
+            })
+
+            expect(state.officialById).toEqual({})
+            expect(Object.keys(state.pendingById)).toEqual(['node/5'])
+            expect(state.bbox).toEqual(collection([]))
+            expect(quarantined.map(({ store }) => store).sort()).toEqual([
+                'bbox',
+                'official',
+            ])
+        })
+
+        it('isolates objects without an ID and duplicate pending objects', () => {
+            const withoutId = feature(30, 'Update') as unknown as Record<
+                string,
+                unknown
+            >
+            delete withoutId['id']
+
+            const { state, quarantined } = migrateLegacyOsmStateWithQuarantine({
+                geojsonChanged: collection([
+                    feature(31, 'Update'),
+                    withoutId as unknown as OsmGoFeature,
+                    feature(31, 'Update'),
+                ]),
+            })
+
+            expect(Object.keys(state.pendingById)).toEqual(['node/31'])
+            expect(quarantined).toHaveLength(2)
+        })
+
+        it('drops an official copy of an object that is also pending', () => {
+            const { state, quarantined } = migrateLegacyOsmStateWithQuarantine({
+                geojson: collection([feature(40)]),
+                geojsonChanged: collection([feature(40, 'Update')]),
+            })
+
+            expect(state.officialById).toEqual({})
+            expect(Object.keys(state.pendingById)).toEqual(['node/40'])
+            expect(quarantined).toEqual([])
+        })
+
+        it('migrates a persisted V1 snapshot with quarantine and a new revision', () => {
+            const { state, quarantined } = recoverPersistedOsmState({
+                schemaVersion: 1,
+                revision: 4,
+                geojson: collection([feature(10), brokenGeometry(11)]),
+                geojsonChanged: collection([feature(-1, 'Create')]),
+                geojsonBbox: collection([]),
+            })
+
+            expect(state.revision).toBe(5)
+            expect(Object.keys(state.officialById)).toEqual(['node/10'])
+            expect(quarantined).toHaveLength(1)
+        })
+
+        it('drops unreadable downloaded areas instead of failing', () => {
+            vi.spyOn(console, 'warn').mockReturnValue(undefined)
+            const { state } = recoverPersistedOsmState({
+                schemaVersion: 2,
+                revision: 3,
+                officialById: { 'node/10': feature(10) },
+                pendingById: { 'node/-1': feature(-1, 'Create') },
+                bbox: { type: 'FeatureCollection', features: 'broken' },
+                nextTemporaryId: -2,
+            })
+
+            expect(state.bbox).toEqual(collection([]))
+            expect(Object.keys(state.officialById)).toEqual(['node/10'])
+            expect(Object.keys(state.pendingById)).toEqual(['node/-1'])
+        })
+
+        it('does not share objects with the stored value', () => {
+            const stored = {
+                schemaVersion: 2,
+                revision: 3,
+                officialById: { 'node/10': feature(10) },
+                pendingById: {},
+                bbox: collection([]),
+                nextTemporaryId: -1,
+            }
+
+            const { state } = recoverPersistedOsmState(stored)
+            state.officialById['node/10'].properties.tags['name'] = 'Changed'
+
+            expect(stored.officialById['node/10'].properties.tags).toEqual({
+                amenity: 'bench',
+            })
+        })
+    })
 })

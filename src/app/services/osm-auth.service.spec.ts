@@ -283,7 +283,57 @@ describe('OsmAuthService', () => {
             )
         ).rejects.toThrow('Invalid OAuth state.')
         expect(http.post).not.toHaveBeenCalled()
+        expect(
+            sessionStorage.getItem('osmOAuthTransaction:prod')
+        ).not.toBeNull()
+    })
+
+    it('finishes the sign-in after a stray callback with another state', async () => {
+        const { state } = await prepareAuthorization()
+        http.post.mockReturnValue(of({ access_token: 'access-token' }))
+        await expect(
+            firstValueFrom(
+                service.handleCallback(
+                    callbackUrl({ code: 'stale', state: 'wrong-state' })
+                )
+            )
+        ).rejects.toThrow('Invalid OAuth state.')
+
+        await firstValueFrom(
+            service.handleCallback(
+                callbackUrl({ code: 'authorization-code', state })
+            )
+        )
+
+        expect(service.getToken()).toBe('access-token')
         expect(sessionStorage.getItem('osmOAuthTransaction:prod')).toBeNull()
+    })
+
+    it('reads a native callback the WebView cannot parse as a URL', async () => {
+        nativePlatform.mockReturnValue(true)
+        const loginUrl = new URL(await service.getLoginUrl())
+        const state = loginUrl.searchParams.get('state')
+        if (!state) throw new Error('Missing state fixture.')
+        http.post.mockReturnValue(of({ access_token: 'native-token' }))
+        vi.stubGlobal(
+            'URL',
+            class {
+                hostname = ''
+                protocol = 'osmgo:'
+                searchParams = new URLSearchParams()
+            }
+        )
+        try {
+            await firstValueFrom(
+                service.handleCallback(
+                    `osmgo://auth?code=authorization-code&state=${state}`
+                )
+            )
+        } finally {
+            vi.unstubAllGlobals()
+        }
+
+        expect(service.getToken()).toBe('native-token')
     })
 
     it('rejects a callback without an authorization code', async () => {
@@ -407,6 +457,105 @@ describe('OsmAuthService', () => {
         await loading
 
         expect(service.getToken()).toBe('new-access-token')
+    })
+
+    describe('granted permissions', () => {
+        it.each([
+            ['read_prefs write_api', true],
+            ['write_api read_prefs', true],
+            [undefined, true],
+            ['read_prefs', false],
+            ['read_prefs write_apis', false],
+        ])('accepting scope %j: %s', async (scope, accepted) => {
+            const { state } = await prepareAuthorization()
+            http.post.mockReturnValue(
+                of({ access_token: 'access-token', scope })
+            )
+
+            const exchange = firstValueFrom(
+                service.handleCallback(callbackUrl({ code: 'code', state }))
+            )
+
+            if (accepted) {
+                await expect(exchange).resolves.toMatchObject({
+                    access_token: 'access-token',
+                })
+                expect(service.getToken()).toBe('access-token')
+            } else {
+                await expect(exchange).rejects.toThrow('does not allow editing')
+                expect(service.getToken()).toBeNull()
+                expect(storage.set).not.toHaveBeenCalledWith(
+                    'osmToken:prod',
+                    expect.anything()
+                )
+            }
+        })
+    })
+
+    describe('signing out', () => {
+        it('waits until the stored token is deleted', async () => {
+            await service.setToken('access-token')
+            const releases: Array<() => void> = []
+            storage.remove.mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        releases.push(resolve)
+                    })
+            )
+
+            let cleared = false
+            const clearing = service.clearToken().then(() => {
+                cleared = true
+            })
+            await vi.waitFor(() => expect(storage.remove).toHaveBeenCalled())
+            await Promise.resolve()
+            expect(cleared).toBe(false)
+            expect(service.getToken()).toBeNull()
+
+            for (const release of releases) release()
+            await clearing
+            expect(cleared).toBe(true)
+        })
+
+        it('revokes the token on OpenStreetMap and forgets it locally', async () => {
+            await service.setToken('access-token')
+            http.post.mockReturnValue(of(''))
+
+            await service.logout()
+
+            const [url, rawBody, options] = http.post.mock.lastCall as [
+                string,
+                string,
+                { headers: HttpHeaders },
+            ]
+            expect(url).toBe('https://www.openstreetmap.org/oauth2/revoke')
+            const body = new URLSearchParams(rawBody)
+            expect(body.get('token')).toBe('access-token')
+            expect(body.get('client_id')).toBe(service.clientId)
+            expect(body.has('client_secret')).toBe(false)
+            expect(options.headers.get('Content-Type')).toBe(
+                'application/x-www-form-urlencoded'
+            )
+            expect(service.getToken()).toBeNull()
+            expect(storage.remove).toHaveBeenCalledWith('osmToken:prod')
+        })
+
+        it('signs out even when the revocation fails', async () => {
+            await service.setToken('access-token')
+            http.post.mockReturnValue(throwError(() => ({ status: 0 })))
+            vi.spyOn(console, 'warn').mockReturnValue(undefined)
+
+            await expect(service.logout()).resolves.toBeUndefined()
+
+            expect(service.getToken()).toBeNull()
+            expect(configService.resetUserInfo).toHaveBeenCalledOnce()
+        })
+
+        it('does not call OpenStreetMap when there is nothing to revoke', async () => {
+            await service.logout()
+
+            expect(http.post).not.toHaveBeenCalled()
+        })
     })
 })
 

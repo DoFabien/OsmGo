@@ -1,13 +1,14 @@
+import { signal } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import { TranslateService } from '@ngx-translate/core'
-import { AppStorage } from '@services/app-storage.service'
-import { ConfigService } from '@services/config.service'
+import { AlertService } from '@services/alert.service'
+import { type Config, ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { OsmAuthService } from '@services/osm-auth.service'
 import { TagsService } from '@services/tags.service'
 import { UploadCoordinatorService } from '@services/upload-coordinator.service'
-import { firstValueFrom, of, throwError, timer } from 'rxjs'
-import { map } from 'rxjs/operators'
+import { firstValueFrom, of, Subject, throwError, timer } from 'rxjs'
+import { map, tap } from 'rxjs/operators'
 import { InitService } from './init.service'
 import { OsmApiService } from './osmApi.service'
 
@@ -36,7 +37,9 @@ describe('InitService', () => {
             loadUserInfo$: vi.fn(() => of(undefined)),
             loadChangeSet$: vi.fn(() => of(undefined)),
             applyUiLanguage: vi.fn(),
+            protectUnreadableStoredConfig: vi.fn(),
             config: vi.fn(() => config),
+            lastView: vi.fn(() => config.lastView),
             userInfo: vi.fn(() => ({
                 uid: '',
                 display_name: '',
@@ -59,6 +62,9 @@ describe('InitService', () => {
             loadHiddenTagsIds$: vi.fn(() => of([])),
         }
         const dataService = {
+            resetStoredOsmState: vi.fn(async () => undefined),
+            hasActiveUploadJournal: signal(false),
+            newlyQuarantinedCount: signal(0),
             loadOsmState$: vi.fn(() =>
                 of({
                     schemaVersion: 2,
@@ -82,11 +88,16 @@ describe('InitService', () => {
                 return 'dev-token'
             }),
         }
+        const uploadState = signal<{ kind: string }>({ kind: 'idle' })
         const uploadCoordinator = {
+            state: uploadState.asReadonly(),
             recoverJournal: vi.fn(async () => ({ kind: 'idle' })),
         }
-        const translate = { use: vi.fn() }
-        const storage = { remove: vi.fn(async () => undefined) }
+        const translate = {
+            use: vi.fn(),
+            instant: vi.fn((key: string) => key),
+        }
+        const alertService = { showAlert: vi.fn() }
 
         TestBed.configureTestingModule({
             providers: [
@@ -100,7 +111,7 @@ describe('InitService', () => {
                     provide: UploadCoordinatorService,
                     useValue: uploadCoordinator,
                 },
-                { provide: AppStorage, useValue: storage },
+                { provide: AlertService, useValue: alertService },
                 { provide: TranslateService, useValue: translate },
             ],
         })
@@ -113,7 +124,9 @@ describe('InitService', () => {
             osmAuth,
             osmApi,
             uploadCoordinator,
-            storage,
+            uploadState,
+            alertService,
+            translate,
         }
     }
 
@@ -205,7 +218,7 @@ describe('InitService', () => {
     })
 
     it('offers a targeted reset when the persisted OSM state is unreadable', async () => {
-        const { service, dataService, storage } = configure()
+        const { service, dataService } = configure()
         dataService.loadOsmState$.mockReturnValue(
             throwError(() => new Error('invalid persisted state'))
         )
@@ -220,8 +233,30 @@ describe('InitService', () => {
             messageKey: 'MAIN.STARTUP.CORRUPTED_STORAGE',
         })
 
+        await expect(service.resetFatalResource()).resolves.toBe(true)
+        expect(dataService.resetStoredOsmState).toHaveBeenCalledOnce()
+    })
+
+    it('reports a reset that kept the data because no backup was written', async () => {
+        const { service, dataService } = configure()
+        dataService.loadOsmState$.mockReturnValue(
+            throwError(() => new Error('invalid persisted state'))
+        )
+        dataService.resetStoredOsmState.mockRejectedValue(
+            new Error('could not be backed up')
+        )
+        vi.spyOn(console, 'error').mockReturnValue(undefined)
+        await expect(firstValueFrom(service.initLoadData$())).rejects.toThrow()
+
+        await expect(service.resetFatalResource()).resolves.toBe(false)
+    })
+
+    it('does not reset anything unless the failure is a resettable one', async () => {
+        const { service, dataService } = configure()
+
         await service.resetFatalResource()
-        expect(storage.remove).toHaveBeenCalledWith('osmState')
+
+        expect(dataService.resetStoredOsmState).not.toHaveBeenCalled()
     })
 
     it('recovers the upload journal before marking startup as loaded', async () => {
@@ -235,5 +270,144 @@ describe('InitService', () => {
 
         expect(uploadCoordinator.recoverJournal).toHaveBeenCalledOnce()
         expect(service.isLoaded).toBe(true)
+    })
+
+    it('reads the saved changeset comment only once the configuration is loaded', async () => {
+        const { service, configService } = configure()
+        const loadConfig = configService.loadConfig$.getMockImplementation()
+        let configEmitted = false
+        configService.loadConfig$.mockImplementation(() =>
+            (loadConfig?.() ?? of(config)).pipe(
+                tap(() => {
+                    configEmitted = true
+                })
+            )
+        )
+        configService.loadChangeSet$.mockImplementation(() => {
+            expect(configEmitted).toBe(true)
+            return of(undefined)
+        })
+
+        await firstValueFrom(service.initLoadData$())
+
+        expect(configService.loadChangeSet$).toHaveBeenCalledOnce()
+    })
+
+    it('protects the stored configuration when only defaults could be used', async () => {
+        const { service, configService, osmAuth } = configure()
+        osmAuth.loadToken.mockResolvedValue('token')
+        configService.loadConfig$.mockReturnValue(
+            throwError(() => new Error('storage unavailable'))
+        )
+
+        await firstValueFrom(service.initLoadData$())
+
+        expect(
+            configService.protectUnreadableStoredConfig
+        ).toHaveBeenCalledOnce()
+        expect(service.recoverableIssues()).toContain('config')
+    })
+
+    it('does not protect the configuration when it loaded normally', async () => {
+        const { service, configService } = configure()
+
+        await firstValueFrom(service.initLoadData$())
+
+        expect(
+            configService.protectUnreadableStoredConfig
+        ).not.toHaveBeenCalled()
+    })
+
+    describe('linked object', () => {
+        afterEach(() => vi.useRealTimers())
+
+        it('starts the map without waiting for a slow linked object', async () => {
+            vi.useFakeTimers()
+            const { service, osmApi } = configure()
+            const coordinates$ = new Subject<{ lon: number; lat: number }>()
+            osmApi.getFirstCoordFromIdObject$.mockReturnValue(coordinates$)
+            let result:
+                | { objectOnStartCoords?: unknown; config: Config }
+                | undefined
+            service
+                .initLoadData$(undefined, undefined, 'relation/1')
+                .subscribe((value) => {
+                    result = value as typeof result
+                })
+
+            await vi.advanceTimersByTimeAsync(3000)
+            expect(result).toBeUndefined()
+            await vi.advanceTimersByTimeAsync(1500)
+
+            expect(result?.objectOnStartCoords).toBeUndefined()
+            expect(service.isLoaded).toBe(true)
+            expect(osmApi.getFirstCoordFromIdObject$).toHaveBeenCalledOnce()
+
+            coordinates$.next({ lon: 5, lat: 45 })
+            expect(service.lateLinkedObjectCoords()).toEqual({
+                lon: 5,
+                lat: 45,
+            })
+        })
+
+        it('does not announce a late position when the object arrived in time', async () => {
+            const { service } = configure()
+
+            await firstValueFrom(
+                service.initLoadData$(undefined, undefined, 'node/1')
+            )
+
+            expect(service.lateLinkedObjectCoords()).toBeUndefined()
+        })
+    })
+
+    describe('upload recovery', () => {
+        it('exposes a failed recovery instead of treating it as a success', async () => {
+            const { service, uploadCoordinator, uploadState } = configure()
+            uploadCoordinator.recoverJournal.mockImplementation(async () => {
+                const failed = { kind: 'failed' }
+                uploadState.set(failed)
+                return failed
+            })
+
+            await firstValueFrom(service.initLoadData$())
+
+            expect(service.isLoaded).toBe(true)
+            expect(service.uploadNeedsAttention()).toBe(true)
+        })
+
+        it('flags an unresolved journal and stays quiet otherwise', async () => {
+            const { service, dataService } = configure()
+            await firstValueFrom(service.initLoadData$())
+            expect(service.uploadNeedsAttention()).toBe(false)
+
+            dataService.hasActiveUploadJournal.set(true)
+
+            expect(service.uploadNeedsAttention()).toBe(true)
+        })
+    })
+
+    describe('objects set aside while loading', () => {
+        it('tells the user once when the load quarantined something', async () => {
+            const { service, dataService, alertService, translate } =
+                configure()
+            dataService.newlyQuarantinedCount.set(3)
+
+            await firstValueFrom(service.initLoadData$())
+
+            expect(translate.instant).toHaveBeenCalledWith(
+                'MAIN.STARTUP.QUARANTINE_NOTICE',
+                { count: 3 }
+            )
+            expect(alertService.showAlert).toHaveBeenCalledOnce()
+        })
+
+        it('stays silent when nothing was set aside', async () => {
+            const { service, alertService } = configure()
+
+            await firstValueFrom(service.initLoadData$())
+
+            expect(alertService.showAlert).not.toHaveBeenCalled()
+        })
     })
 })

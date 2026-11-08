@@ -1,16 +1,22 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http'
 import { InjectionToken, inject, Service, signal } from '@angular/core'
+import {
+    NATIVE_OAUTH_REDIRECT_URI,
+    readNativeOAuthCallback,
+} from '@app/utils/native-oauth-callback'
 import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
 import { AppStorage } from '@services/app-storage.service'
-import { defer, from, map, type Observable, of } from 'rxjs'
+import { defer, firstValueFrom, from, map, type Observable, of } from 'rxjs'
 import { finalize, switchMap, timeout } from 'rxjs/operators'
 
 import { ConfigService } from './config.service'
 
 const OAUTH_SCOPES = 'read_prefs write_api'
+const OAUTH_REQUIRED_SCOPE = 'write_api'
 const OAUTH_TRANSACTION_TTL_MS = 10 * 60 * 1000
 const OAUTH_TOKEN_TIMEOUT_MS = 30_000
+const OAUTH_REVOKE_TIMEOUT_MS = 10_000
 
 interface OAuthTransaction {
     state: string
@@ -92,7 +98,7 @@ export class OsmAuthService {
 
     get redirectUri(): string {
         if (Capacitor.isNativePlatform()) {
-            return 'osmgo://auth'
+            return NATIVE_OAUTH_REDIRECT_URI
         }
         return document.baseURI
     }
@@ -196,6 +202,17 @@ export class OsmAuthService {
                             'OpenStreetMap returned no OAuth access token.'
                         )
                     }
+                    if (
+                        typeof response.scope === 'string' &&
+                        !response.scope
+                            .split(/\s+/)
+                            .includes(OAUTH_REQUIRED_SCOPE)
+                    ) {
+                        // A token that cannot edit would only fail at upload.
+                        throw new Error(
+                            'The OpenStreetMap authorization does not allow editing the map.'
+                        )
+                    }
 
                     return from(this.setToken(response.access_token)).pipe(
                         map(() => response)
@@ -221,11 +238,15 @@ export class OsmAuthService {
         }
     }
 
-    clearToken(): void {
+    /**
+     * Forgets the token locally. The returned promise settles once the stored
+     * copy is deleted; a storage failure is logged, not thrown.
+     */
+    clearToken(): Promise<void> {
         this.tokenRevision++
         this.tokenState.set(null)
         const tokenKey = this.tokenStorageKey
-        void this.queueTokenPersistence(async () => {
+        const deletion = this.queueTokenPersistence(async () => {
             await Promise.all([
                 this.localStorage.remove(tokenKey),
                 this.localStorage.remove('osmToken'),
@@ -235,6 +256,32 @@ export class OsmAuthService {
         })
         this.configService.resetUserInfo()
         this.configService.resetChangeset()
+        return deletion
+    }
+
+    /**
+     * Asks OpenStreetMap to invalidate a token. Failing (offline, refused) is
+     * harmless: the token was already forgotten locally.
+     */
+    private async revokeToken(token: string): Promise<void> {
+        const body = new URLSearchParams()
+        body.set('token', token)
+        body.set('client_id', this.clientId)
+        try {
+            await firstValueFrom(
+                this.http
+                    .post(`${this.oauthUrl}/revoke`, body.toString(), {
+                        headers: new HttpHeaders().set(
+                            'Content-Type',
+                            'application/x-www-form-urlencoded'
+                        ),
+                        responseType: 'text',
+                    })
+                    .pipe(timeout(OAUTH_REVOKE_TIMEOUT_MS))
+            )
+        } catch (error) {
+            console.warn('The OAuth token could not be revoked.', error)
+        }
     }
 
     async clearAllAuthentication(): Promise<void> {
@@ -261,8 +308,11 @@ export class OsmAuthService {
         return this.token()
     }
 
-    logout(): void {
-        this.clearToken()
+    /** Signs out: forgets the token, then revokes it on OpenStreetMap. */
+    async logout(): Promise<void> {
+        const token = this.token()
+        const revocation = token ? this.revokeToken(token) : Promise.resolve()
+        await Promise.all([this.clearToken(), revocation])
     }
 
     isAuthenticated(): boolean {
@@ -304,19 +354,24 @@ export class OsmAuthService {
         )
     }
 
+    /**
+     * The stored transaction is only removed once the callback carries its
+     * `state`: a stale or forged callback cannot cancel the sign-in in
+     * progress.
+     */
     private async consumeAuthorization(
         url: string
     ): Promise<{ code: string; verifier: string }> {
-        const callbackUrl = new URL(url, document.baseURI)
         const isNative = Capacitor.isNativePlatform()
+        let parameters: URLSearchParams
         if (isNative) {
-            if (
-                callbackUrl.protocol !== 'osmgo:' ||
-                callbackUrl.hostname !== 'auth'
-            ) {
+            const nativeParameters = readNativeOAuthCallback(url)
+            if (!nativeParameters) {
                 throw new Error('Invalid native OAuth callback URL.')
             }
+            parameters = nativeParameters
         } else {
+            const callbackUrl = new URL(url, document.baseURI)
             const redirectUrl = new URL(document.baseURI)
             if (
                 callbackUrl.origin !== redirectUrl.origin ||
@@ -324,6 +379,7 @@ export class OsmAuthService {
             ) {
                 throw new Error('Invalid web OAuth callback URL.')
             }
+            parameters = callbackUrl.searchParams
         }
 
         const storageKey = this.transactionStorageKey
@@ -331,36 +387,40 @@ export class OsmAuthService {
         if (isNative) {
             transaction =
                 await this.localStorage.get<OAuthTransaction>(storageKey)
-            await this.localStorage.remove(storageKey)
         } else {
             const persisted = sessionStorage.getItem(storageKey)
-            sessionStorage.removeItem(storageKey)
             if (persisted) {
                 try {
                     transaction = JSON.parse(persisted) as OAuthTransaction
                 } catch {
+                    sessionStorage.removeItem(storageKey)
                     throw new Error('The OAuth transaction is corrupted.')
                 }
             }
         }
 
-        const oauthError = callbackUrl.searchParams.get('error')
+        const state = parameters.get('state')
+        if (!transaction || !state || state !== transaction.state) {
+            throw new Error('Invalid OAuth state.')
+        }
+        if (isNative) {
+            await this.localStorage.remove(storageKey)
+        } else {
+            sessionStorage.removeItem(storageKey)
+        }
+
+        const oauthError = parameters.get('error')
         if (oauthError) {
-            const description =
-                callbackUrl.searchParams.get('error_description')
+            const description = parameters.get('error_description')
             throw new Error(description || oauthError)
         }
-        const code = callbackUrl.searchParams.get('code')
+        const code = parameters.get('code')
         if (!code) {
             throw new Error('No authorization code found in callback URL.')
         }
-        const state = callbackUrl.searchParams.get('state')
         if (
-            !transaction ||
             transaction.environment !== this.environmentId ||
-            transaction.redirectUri !== this.redirectUri ||
-            !state ||
-            state !== transaction.state
+            transaction.redirectUri !== this.redirectUri
         ) {
             throw new Error('Invalid OAuth state.')
         }

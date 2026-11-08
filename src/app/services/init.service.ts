@@ -1,10 +1,10 @@
-import { inject, Service, signal } from '@angular/core'
-import { AppStorage } from '@services/app-storage.service'
+import { computed, inject, Service, signal } from '@angular/core'
+import { TranslateService } from '@ngx-translate/core'
+import { AlertService } from '@services/alert.service'
 import type { Config } from '@services/config.service'
 import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { OsmAuthService } from '@services/osm-auth.service'
-import { OSM_STATE_STORAGE_KEY } from '@services/osm-state'
 import { TagsService } from '@services/tags.service'
 import { UploadCoordinatorService } from '@services/upload-coordinator.service'
 import { defer, forkJoin, from, type Observable, of, throwError } from 'rxjs'
@@ -15,8 +15,12 @@ import {
     shareReplay,
     switchMap,
     tap,
+    timeout,
 } from 'rxjs/operators'
 import { OsmApiService } from './osmApi.service'
+
+/** How long the map waits for a linked object before it starts without it. */
+const LINKED_OBJECT_WAIT_MS = 4000
 
 type StartupResource =
     | 'config'
@@ -53,7 +57,8 @@ export class InitService {
     readonly configService = inject(ConfigService)
     readonly tagsService = inject(TagsService)
     readonly dataService = inject(DataService)
-    private readonly storage = inject(AppStorage)
+    private readonly alertService = inject(AlertService)
+    private readonly translate = inject(TranslateService)
     private readonly osmAuth = inject(OsmAuthService)
     private readonly osmApi = inject(OsmApiService)
     private readonly uploadCoordinator = inject(UploadCoordinatorService)
@@ -65,11 +70,30 @@ export class InitService {
     readonly recoverableIssues = this.recoverableIssuesState.asReadonly()
     private readonly fatalErrorState = signal<StartupFatalError | null>(null)
     readonly fatalError = this.fatalErrorState.asReadonly()
+    private readonly lateLinkedObjectCoordsState = signal<
+        { lon: number; lat: number } | undefined
+    >(undefined)
+    /**
+     * Position of the linked object (`?id=node/123`) when it was found after
+     * the map had already started: the map should move there.
+     */
+    readonly lateLinkedObjectCoords =
+        this.lateLinkedObjectCoordsState.asReadonly()
+    /**
+     * True while an upload attempt needs the user's attention: an unresolved
+     * journal or a failed recovery. The upload screen explains what to do.
+     */
+    readonly uploadNeedsAttention = computed(
+        () =>
+            this.dataService.hasActiveUploadJournal() ||
+            this.uploadCoordinator.state().kind === 'failed'
+    )
 
     private recover<T>(
         resource: StartupResource,
         source: Observable<T>,
-        fallback: T
+        fallback: T,
+        onFallback?: () => void
     ): Observable<T> {
         return source.pipe(
             catchError((error) => {
@@ -80,6 +104,7 @@ export class InitService {
                 this.recoverableIssuesState.update((issues) =>
                     issues.includes(resource) ? issues : [...issues, resource]
                 )
+                onFallback?.()
                 return of(fallback)
             })
         )
@@ -98,9 +123,46 @@ export class InitService {
         )
     }
 
-    async resetFatalResource(): Promise<void> {
-        if (!this.fatalError()?.canResetLocalData) return
-        await this.storage.remove(OSM_STATE_STORAGE_KEY)
+    /**
+     * Sets the unreadable OSM data aside (copied under another name first, V1
+     * collections included) so the next start can begin from a clean state.
+     * Resolves to false when nothing was reset, the data being kept because
+     * no copy could be written.
+     */
+    async resetFatalResource(): Promise<boolean> {
+        if (!this.fatalError()?.canResetLocalData) return false
+        try {
+            await this.dataService.resetStoredOsmState()
+            return true
+        } catch (error) {
+            console.error('The local OSM data could not be reset.', error)
+            return false
+        }
+    }
+
+    /** The coordinates of a linked object, without holding the map back. */
+    private resolveLinkedObject$(
+        objectId: string
+    ): Observable<{ lon: number; lat: number } | undefined> {
+        const coordinates$ = this.osmApi
+            .getFirstCoordFromIdObject$(objectId)
+            .pipe(shareReplay({ bufferSize: 1, refCount: false }))
+        let startedWithoutIt = false
+        coordinates$.subscribe({
+            next: (coordinates) => {
+                if (startedWithoutIt) {
+                    this.lateLinkedObjectCoordsState.set(coordinates)
+                }
+            },
+            error: () => undefined,
+        })
+        return coordinates$.pipe(
+            timeout(LINKED_OBJECT_WAIT_MS),
+            catchError(() => {
+                startedWithoutIt = true
+                return of(undefined)
+            })
+        )
     }
 
     /**
@@ -116,6 +178,7 @@ export class InitService {
             this.loadingState.set(true)
             this.fatalErrorState.set(null)
             this.recoverableIssuesState.set([])
+            this.lateLinkedObjectCoordsState.set(undefined)
 
             const config$ = this.recover(
                 'config',
@@ -126,7 +189,11 @@ export class InitService {
                             this.configService.loadConfig$(i18nConfig)
                         )
                     ),
-                this.configService.config()
+                {
+                    ...this.configService.config(),
+                    lastView: this.configService.lastView(),
+                },
+                () => this.configService.protectUnreadableStoredConfig()
             ).pipe(shareReplay({ bufferSize: 1, refCount: true }))
 
             return forkJoin({
@@ -146,7 +213,10 @@ export class InitService {
                 ),
                 changeSet: this.recover(
                     'changeSet',
-                    this.configService.loadChangeSet$(),
+                    // The saved comment comes from the configuration.
+                    config$.pipe(
+                        switchMap(() => this.configService.loadChangeSet$())
+                    ),
                     this.configService.getChangeset()
                 ),
                 savedFields: this.recover(
@@ -190,9 +260,7 @@ export class InitService {
                 objectOnStartCoords: idOsmObjectOnStart
                     ? config$.pipe(
                           switchMap(() =>
-                              this.osmApi.getFirstCoordFromIdObject$(
-                                  idOsmObjectOnStart
-                              )
+                              this.resolveLinkedObject$(idOsmObjectOnStart)
                           ),
                           catchError(() => of(undefined))
                       )
@@ -236,6 +304,7 @@ export class InitService {
                     this.configService.applyUiLanguage(
                         this.configService.config().languageUi
                     )
+                    this.announceQuarantinedObjects()
                 }),
                 catchError((error: unknown) => {
                     const resource =
@@ -257,5 +326,16 @@ export class InitService {
                 finalize(() => this.loadingState.set(false))
             )
         })
+    }
+
+    private announceQuarantinedObjects(): void {
+        const count = this.dataService.newlyQuarantinedCount()
+        if (count > 0) {
+            this.alertService.showAlert(
+                this.translate.instant('MAIN.STARTUP.QUARANTINE_NOTICE', {
+                    count,
+                })
+            )
+        }
     }
 }

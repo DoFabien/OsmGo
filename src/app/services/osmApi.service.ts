@@ -1,8 +1,18 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http'
 import { inject, Service } from '@angular/core'
+import {
+    type ChangesetBbox,
+    fitsInOneChangeset,
+    isChangesetBbox,
+    unionBbox,
+} from '@app/utils/changeset-bbox'
 import { cloneDeep } from '@app/utils/clone'
-import { isNodeUsedByWay } from '@app/utils/osm-feature'
-import { normalizeOsmTags } from '@app/utils/osm-tags'
+import { isNodeReferencedByWayOrRelation } from '@app/utils/osm-feature'
+import {
+    MAX_CHANGESET_COMMENT_LENGTH,
+    normalizeOsmTags,
+    osmTextLength,
+} from '@app/utils/osm-tags'
 import type {
     FeatureIdSource,
     OsmGoFeature,
@@ -20,12 +30,36 @@ import { requireMapDataResult } from '@services/osm-data-validation'
 import { TagsService } from '@services/tags.service'
 import { XMLParser, XMLValidator } from 'fast-xml-parser'
 import type { BBox } from 'geojson'
-import { from, Observable, of, throwError } from 'rxjs'
-import { catchError, map, switchMap, take, timeout } from 'rxjs/operators'
+import {
+    from,
+    Observable,
+    of,
+    type Subscription,
+    throwError,
+    timer,
+} from 'rxjs'
+import {
+    catchError,
+    map,
+    mergeMap,
+    switchMap,
+    take,
+    takeUntil,
+    timeout,
+    toArray,
+} from 'rxjs/operators'
 import { OsmAuthService } from './osm-auth.service'
 
 const OSM_REQUEST_TIMEOUT_MS = 30_000
+/** A large diff can legitimately take minutes on a mobile connection. */
+export const OSM_UPLOAD_TIMEOUT_MS = 150_000
 const OSM_WORKER_TIMEOUT_MS = 30_000
+/** Multipolygons cut by the edge of a download that are fetched in full. */
+const MAX_INCOMPLETE_RELATIONS = 20
+const RELATION_FETCH_CONCURRENCY = 4
+const RELATION_FETCH_TIMEOUT_MS = 10_000
+/** The download goes on with what arrived once this budget is spent. */
+const RELATION_FETCH_BUDGET_MS = 20_000
 
 interface OsmUserResponse {
     user: {
@@ -34,12 +68,20 @@ interface OsmUserResponse {
     }
 }
 
-interface OsmApiObject {
+export interface OsmApiObject {
     type: 'node' | 'way' | 'relation'
+    id?: string | number
+    version?: number
+    visible?: boolean
+    timestamp?: string
+    changeset?: string | number
+    user?: string
+    uid?: string | number
     lon?: string | number
     lat?: string | number
     nodes?: Array<string | number>
     members?: OsmRelationMember[]
+    tags?: Record<string, string>
 }
 
 interface OsmObjectResponse {
@@ -49,6 +91,8 @@ interface OsmObjectResponse {
 interface WorkerResponse {
     ok: boolean
     data?: ConvertResult
+    /** The worker waits for the full version of these relations. */
+    incompleteRelationIds?: unknown[]
     error?: string
 }
 
@@ -120,7 +164,18 @@ export class OsmApiService {
             })
         )
     }
-    createOSMChangeSet(comment: string): Observable<string> {
+    createOSMChangeSet(
+        comment: string,
+        bbox?: ChangesetBbox
+    ): Observable<string> {
+        if (osmTextLength(comment) > MAX_CHANGESET_COMMENT_LENGTH) {
+            return throwError(
+                () =>
+                    new Error(
+                        `The changeset comment is longer than ${MAX_CHANGESET_COMMENT_LENGTH} characters.`
+                    )
+            )
+        }
         const appVersion = this.configService.getAppFullVersion()
 
         const localeId = navigator?.language || '*'
@@ -164,7 +219,8 @@ export class OsmApiService {
                         changesetId,
                         Date.now(),
                         Date.now(),
-                        comment
+                        comment,
+                        bbox
                     )
                     return changesetId
                 }),
@@ -174,18 +230,60 @@ export class OsmApiService {
             )
     }
 
-    getValidChangeset(comment: string): Observable<string> {
+    /**
+     * Reuses the open changeset for the same comment within the hour, unless
+     * the upload would stretch the area it covers past one neighbourhood: a
+     * new changeset is then opened and the previous one closed.
+     */
+    getValidChangeset(
+        comment: string,
+        bbox?: ChangesetBbox
+    ): Observable<string> {
         const changeset = this.configService.getChangeset()
         if (
             !/^[1-9]\d*$/.test(changeset.id) ||
             comment !== changeset.comment ||
             Date.now() - changeset.last_changeset_activity > 3_540_000
         ) {
-            return this.createOSMChangeSet(comment)
+            return this.createOSMChangeSet(comment, bbox)
         }
+        if (!bbox) return of(changeset.id)
+        const covered = isChangesetBbox(changeset.bbox)
+            ? unionBbox(changeset.bbox, bbox)
+            : undefined
+        if (!covered || !fitsInOneChangeset(covered)) {
+            this.closeChangesetQuietly(changeset.id)
+            return this.createOSMChangeSet(comment, bbox)
+        }
+        this.configService.setChangesetBbox(covered)
         return of(changeset.id)
     }
 
+    /** Best effort: OpenStreetMap closes an idle changeset after an hour. */
+    private closeChangesetQuietly(changesetId: string): void {
+        const token = this.osmAuthService.getToken()
+        if (!token) return
+        const headers = new HttpHeaders().set(
+            'Authorization',
+            `Bearer ${token}`
+        )
+        this.http
+            .put(
+                `${this.getUrlApi()}/api/0.6/changeset/${changesetId}/close`,
+                '',
+                { headers, responseType: 'text' }
+            )
+            .pipe(timeout(OSM_REQUEST_TIMEOUT_MS))
+            .subscribe({
+                error: (error: unknown) =>
+                    console.warn('Could not close the changeset.', error),
+            })
+    }
+
+    /**
+     * Attribute values are normalised by XML parsers: raw line breaks and tabs
+     * would be flattened to spaces, so they travel as character references.
+     */
     escapeXmlValue(value: unknown): string {
         return String(value)
             .replace(/&/g, '&amp;')
@@ -193,6 +291,9 @@ export class OsmApiService {
             .replace(/"/g, '&quot;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
+            .replace(/\n/g, '&#10;')
+            .replace(/\r/g, '&#13;')
+            .replace(/\t/g, '&#9;')
     }
 
     osmGoFeaturesToOsmDiffFile(
@@ -211,7 +312,7 @@ export class OsmApiService {
                 const xml = this.geojson2OsmUpdate(feature, idChangeset)
                 modifyChanges.push(xml)
             } else if (feature.properties.changeType === 'Delete') {
-                if (isNodeUsedByWay(feature)) {
+                if (isNodeReferencedByWayOrRelation(feature)) {
                     const featureWithoutTags = {
                         ...feature,
                         properties: { ...feature.properties, tags: {} },
@@ -363,6 +464,19 @@ export class OsmApiService {
         diffFile: string,
         changesetId: string
     ): Observable<OsmDiffResult[]> {
+        return this.apiOsmSendOsmDiffFileRaw$(diffFile, changesetId).pipe(
+            map((diffTextResult) => this.convertDiffFileResult(diffTextResult))
+        )
+    }
+
+    /**
+     * Sends the diff and returns the response text untouched, so the caller can
+     * persist what the server answered before interpreting it.
+     */
+    apiOsmSendOsmDiffFileRaw$(
+        diffFile: string,
+        changesetId: string
+    ): Observable<string> {
         const url =
             this.getUrlApi() + `/api/0.6/changeset/${changesetId}/upload`
 
@@ -383,20 +497,32 @@ export class OsmApiService {
                 responseType: 'text',
             })
             .pipe(
-                timeout(OSM_REQUEST_TIMEOUT_MS),
-                map((diffTextResult) => {
-                    return this.convertDiffFileResult(diffTextResult)
-                }),
+                timeout(OSM_UPLOAD_TIMEOUT_MS),
+                map((diffTextResult) => String(diffTextResult)),
                 catchError((error) =>
                     this.handleAuthenticatedRequestError(error)
                 )
             )
     }
 
+    /** The osmChange document of everything uploaded in a changeset. */
+    downloadChangeset$(changesetId: string): Observable<string> {
+        if (!/^[1-9]\d*$/.test(changesetId)) {
+            return throwError(() => new Error('Invalid changeset ID.'))
+        }
+        const headers = new HttpHeaders().set('Accept', 'application/xml')
+        return this.http
+            .get(
+                this.getUrlApi() + `/api/0.6/changeset/${changesetId}/download`,
+                { headers, responseType: 'text' }
+            )
+            .pipe(timeout(OSM_REQUEST_TIMEOUT_MS))
+    }
+
     private handleAuthenticatedRequestError(error: unknown): Observable<never> {
         const status = this.getErrorStatus(error)
         if (status === 401) {
-            this.osmAuthService.clearToken()
+            void this.osmAuthService.clearToken()
         }
         return throwError(() => error)
     }
@@ -541,23 +667,50 @@ export class OsmApiService {
                 return
             }
             let isFinished = false
+            let relationFetch: Subscription | undefined
             const finish = (callback: () => void): void => {
                 if (isFinished) return
                 isFinished = true
                 window.clearTimeout(timeoutId)
+                relationFetch?.unsubscribe()
                 worker.terminate()
                 callback()
             }
             const fail = (message: string): void => {
                 finish(() => subscriber.error(new Error(message)))
             }
-            const timeoutId = window.setTimeout(() => {
-                fail('OSM data conversion timed out.')
-            }, OSM_WORKER_TIMEOUT_MS)
+            const startTimeout = (): number =>
+                window.setTimeout(() => {
+                    fail('OSM data conversion timed out.')
+                }, OSM_WORKER_TIMEOUT_MS)
+            let timeoutId = startTimeout()
 
             worker.onmessage = (event) => {
                 const response = event.data as WorkerResponse
                 const data = response?.data
+                if (
+                    response?.ok &&
+                    Array.isArray(response.incompleteRelationIds)
+                ) {
+                    // The conversion pauses while the relations are fetched.
+                    window.clearTimeout(timeoutId)
+                    relationFetch = this.fetchRelationsElements$(
+                        response.incompleteRelationIds
+                    ).subscribe((supplementalElements) => {
+                        if (isFinished) return
+                        timeoutId = startTimeout()
+                        try {
+                            worker.postMessage({ supplementalElements })
+                        } catch (error) {
+                            fail(
+                                error instanceof Error
+                                    ? error.message
+                                    : 'The OSM data worker could not continue.'
+                            )
+                        }
+                    })
+                    return
+                }
                 if (!response || typeof response.ok !== 'boolean') {
                     fail('The OSM data worker returned an invalid response.')
                 } else if (response.ok) {
@@ -603,13 +756,14 @@ export class OsmApiService {
 
             try {
                 worker.postMessage({
-                    tagsConfig: this.tagsService.tags(),
+                    tagsConfig: this.tagsService.converterTags(),
                     primaryKeys: this.tagsService.primaryKeys(),
                     osmData,
                     oldGeojson,
                     oldBboxFeature,
                     geojsonChanged,
                     limitFeatures,
+                    maxIncompleteRelations: MAX_INCOMPLETE_RELATIONS,
                 })
             } catch (error) {
                 fail(
@@ -621,6 +775,49 @@ export class OsmApiService {
 
             return () => finish(() => {})
         })
+    }
+
+    /**
+     * The elements of `relation/{id}/full` for each relation, a few requests
+     * at a time. A relation that cannot be fetched is skipped, and the budget
+     * bounds the wait: the download keeps the relations that arrived.
+     */
+    private fetchRelationsElements$(
+        relationIds: unknown[]
+    ): Observable<unknown[]> {
+        const ids = relationIds
+            .map((id) => Number(id))
+            .filter((id) => Number.isSafeInteger(id) && id > 0)
+        const headers = new HttpHeaders().set('Accept', 'application/json')
+        return from(ids).pipe(
+            mergeMap(
+                (id) =>
+                    this.http
+                        .get<OsmObjectResponse>(
+                            `${this.getUrlApi()}/api/0.6/relation/${id}/full.json`,
+                            { headers, responseType: 'json' }
+                        )
+                        .pipe(
+                            timeout(RELATION_FETCH_TIMEOUT_MS),
+                            map((response) =>
+                                Array.isArray(response?.elements)
+                                    ? response.elements
+                                    : []
+                            ),
+                            catchError((error: unknown) => {
+                                console.warn(
+                                    `Could not complete relation ${id}.`,
+                                    error
+                                )
+                                return of([])
+                            })
+                        ),
+                RELATION_FETCH_CONCURRENCY
+            ),
+            takeUntil(timer(RELATION_FETCH_BUDGET_MS)),
+            toArray(),
+            map((responses) => responses.flat())
+        )
     }
 
     getOsmObjectById$(objectId: string): Observable<OsmApiObject> {
