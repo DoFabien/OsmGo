@@ -15,11 +15,20 @@ import { MatIconModule } from '@angular/material/icon'
 import { MatSnackBar } from '@angular/material/snack-bar'
 import { MatTooltipModule } from '@angular/material/tooltip'
 import { cloneDeep } from '@app/utils/clone'
+import { resolveReplacementTags } from '@app/utils/deprecated-tags'
 import { isNodeUsedByWay } from '@app/utils/osm-feature'
+import { isSafeExternalUrl } from '@app/utils/safe-external-url'
 import { IconComponent } from '@components/icon/icon.component'
 import { AlertComponent } from '@components/modal/components/alert/alert.component'
 import { OpeningHoursComponent } from '@components/modal/components/opening-hours/opening-hours.component'
+import { splitSemiComboValue } from '@components/modal/components/semi-combo/semi-combo.component'
 import { SurveyCard } from '@components/modal/components/survey-card/SurveyCard'
+import {
+    isCoveredByPreset,
+    isMultiValuePreset,
+    isPrefixPreset,
+    multiValueKey,
+} from '@components/modal/editor-tag'
 import {
     type ModalDismissData,
     ObjectEditorContentComponent,
@@ -86,6 +95,8 @@ const SUMMARY_LABELS: Record<string, string> = {
 }
 
 const SUMMARY_ORDER = ['material', 'start_date', 'artist_name', 'description']
+
+const SURVEY_DATE_KEYS = ['survey:date', 'check_date']
 
 @Component({
     selector: 'app-object-sheet',
@@ -203,27 +214,58 @@ export class ObjectSheetComponent {
         return 'minimum'
     })
     readonly category = computed(() => {
-        const feature = this.feature()
+        const { configId, primaryTag } = this.feature().properties
         const language = this.configService.config().languageTags
-        const config = this.tagsService
-            .tags()
-            .find(
-                (candidate) =>
-                    candidate.id === feature.properties.configId ||
-                    candidate.id ===
-                        `${feature.properties.primaryTag.key}/${feature.properties.primaryTag.value}`
-            )
+        const tagsById = this.tagsService.tagsById()
+        // The category found for the object comes before the one of its main tag.
+        const config =
+            (configId ? tagsById[configId] : undefined) ??
+            tagsById[`${primaryTag.key}/${primaryTag.value}`]
         return (
             config?.lbl?.[language] ||
             config?.lbl?.['en'] ||
-            String(feature.properties.primaryTag.value)
+            String(primaryTag.value)
         )
+    })
+    private readonly prefixPresets = computed(() =>
+        Object.values(this.tagsService.presets()).filter(isPrefixPreset)
+    )
+    /**
+     * The fields that gather several tags of the object in one row: those of
+     * the category first, then any key prefix field (`payment:`, `diet:`…).
+     */
+    readonly multiValueFields = computed<Preset[]>(() => {
+        const tagConfig = this.selectedTagConfig()
+        const presets = this.tagsService.presets()
+        const keys = Object.entries(this.feature().properties.tags)
+            .filter(([, value]) => value !== '' && value !== undefined)
+            .map(([key]) => key)
+        const candidates = [
+            ...[...(tagConfig.presets ?? []), ...(tagConfig.moreFields ?? [])]
+                .map((presetId) => presets[presetId])
+                .filter((preset): preset is Preset =>
+                    isMultiValuePreset(preset)
+                ),
+            ...this.prefixPresets(),
+        ]
+        const fields: Preset[] = []
+        for (const preset of candidates) {
+            const coversNewKey = keys.some(
+                (key) =>
+                    isCoveredByPreset(preset, key) &&
+                    !fields.some((field) => isCoveredByPreset(field, key))
+            )
+            if (coversNewKey) fields.push(preset)
+        }
+        return fields
     })
     readonly rows = computed<ObjectSummaryRow[]>(() => {
         const feature = this.feature()
         const tags = feature.properties.tags
         const primaryKey = feature.properties.primaryTag.key
         const displayCode = this.displayCode()
+        const multiValueFields = displayCode ? [] : this.multiValueFields()
+        const shownFields = new Set<Preset>()
 
         return Object.entries(tags)
             .filter(
@@ -240,30 +282,45 @@ export class ObjectSheetComponent {
                     (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex)
                 )
             })
-            .map(([key, value]) => {
+            .flatMap(([key, value]): ObjectSummaryRow[] => {
+                const field = multiValueFields.find((candidate) =>
+                    isCoveredByPreset(candidate, key)
+                )
+                if (field) {
+                    if (shownFields.has(field)) return []
+                    shownFields.add(field)
+                    return [this.getMultiValueRow(field, tags)]
+                }
                 const preset =
                     this.tagsService.presets()[osmTagKeyToPresetId(key)]
                 const rawValue = String(value)
-                return {
-                    key,
-                    href:
-                        !displayCode &&
-                        preset?.type === 'url' &&
-                        /^https?:\/\//i.test(rawValue)
+                return [
+                    {
+                        key,
+                        href:
+                            !displayCode &&
+                            preset?.type === 'url' &&
+                            isSafeExternalUrl(rawValue)
+                                ? rawValue
+                                : undefined,
+                        icon: displayCode
+                            ? 'code'
+                            : (SUMMARY_ICONS[key] ?? 'sell'),
+                        isOpeningHours: key === 'opening_hours' && !displayCode,
+                        label: displayCode
+                            ? key
+                            : this.getPresetLabel(key, preset),
+                        value: displayCode
                             ? rawValue
-                            : undefined,
-                    icon: displayCode ? 'code' : (SUMMARY_ICONS[key] ?? 'sell'),
-                    isOpeningHours: key === 'opening_hours' && !displayCode,
-                    label: displayCode ? key : this.getPresetLabel(key, preset),
-                    value: displayCode
-                        ? rawValue
-                        : this.getPresetValue(rawValue, preset),
-                }
+                            : this.getPresetValue(rawValue, preset),
+                    },
+                ]
             })
     })
     readonly lastSurvey = computed<Date | undefined>(() => {
-        const surveyDates = ['survey:date', 'check_date']
-            .map((key) => this.feature().properties.tags[key])
+        const surveyDates = SURVEY_DATE_KEYS.map(
+            (key) => this.feature().properties.tags[key]
+        )
             .filter((value): value is string | number => value !== undefined)
             .map((value) => parseLocalizedDate(value))
             .filter((value): value is Date => value !== null)
@@ -351,12 +408,16 @@ export class ObjectSheetComponent {
 
     fixDeprecated(deprecated: DeprecatedTags): void {
         const feature = cloneDeep(this.feature())
+        const replace = resolveReplacementTags(
+            deprecated.replace,
+            feature.properties.tags
+        )
         for (const deprecatedKey of Object.keys(deprecated.old)) {
             delete feature.properties.tags[deprecatedKey]
         }
         feature.properties.tags = {
             ...feature.properties.tags,
-            ...deprecated.replace,
+            ...replace,
         }
         this.editRequested.emit(feature)
     }
@@ -364,10 +425,11 @@ export class ObjectSheetComponent {
     handleSurveyYes(): void {
         const feature = cloneDeep(this.feature())
         const checkedKey = this.configService.config().checkedKey
-        delete feature.properties.tags[
-            checkedKey === 'survey:date' ? 'check_date' : 'survey:date'
-        ]
-        feature.properties.tags[checkedKey] = this.generateISODate(new Date())
+        const today = this.generateISODate(new Date())
+        const tags = feature.properties.tags
+        for (const key of SURVEY_DATE_KEYS) {
+            if (key === checkedKey || key in tags) tags[key] = today
+        }
         this.persistFeature(feature)
     }
 
@@ -393,6 +455,33 @@ export class ObjectSheetComponent {
             .afterClosed()
             .subscribe((confirmed) => {
                 if (confirmed) this.deleteSelectedObject()
+            })
+    }
+
+    confirmCancelChange(): void {
+        const changeType = this.feature().properties.changeType
+        const messageKey =
+            changeType === 'Create'
+                ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_CREATED'
+                : changeType === 'Delete'
+                  ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_DELETED'
+                  : 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE'
+        const data: ConfirmDialogData = {
+            title: this.translate.instant('MAIN.SELECTION.REVERT_LOCAL_TITLE'),
+            message: this.translate.instant(messageKey),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant('MAIN.SELECTION.DISCARD'),
+            destructive: true,
+        }
+        this.dialog
+            .open(ConfirmDialogComponent, {
+                data,
+                maxWidth: 'calc(100vw - 32px)',
+                panelClass: 'osmgo-dialog',
+            })
+            .afterClosed()
+            .subscribe((confirmed) => {
+                if (confirmed) void this.cancelChange()
             })
     }
 
@@ -429,6 +518,10 @@ export class ObjectSheetComponent {
             expanded: 'collapsed',
         }
         this.levelChange.emit(nextLevel[this.level()])
+    }
+
+    onHandleClick(event: MouseEvent): void {
+        if (event.detail === 0) this.cycleLevel()
     }
 
     toggleExpandedLevel(): void {
@@ -595,6 +688,12 @@ export class ObjectSheetComponent {
         this.categoryOpen.set(true)
     }
 
+    closeCategory(): boolean {
+        if (!this.categoryOpen()) return false
+        this.handleCategoryCompleted(null)
+        return true
+    }
+
     handleCategoryCompleted(tagConfig: TagConfig | null): void {
         if (tagConfig) this.editor()?.applyPrimaryTagSelection(tagConfig)
         this.categoryOpen.set(false)
@@ -686,12 +785,89 @@ export class ObjectSheetComponent {
         if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
             return formatLocalizedDate(value, this.userLocale)
         }
-        if (!preset?.options) {
-            return value
+        if (preset?.type === 'semiCombo') {
+            return splitSemiComboValue(value)
+                .map((part) => this.getOptionLabel(part, preset))
+                .join(', ')
         }
-        const option = preset.options.find((candidate) => candidate.v === value)
+        return this.getOptionLabel(value, preset)
+    }
+
+    private getOptionLabel(value: string, preset?: Preset): string {
+        const option = preset?.options?.find(
+            (candidate) => candidate.v === value
+        )
         const language = this.configService.config().languageTags
         return option?.lbl?.[language] || option?.lbl?.['en'] || value
+    }
+
+    /** `Cash, Card, Visa: no` for `payment:cash=yes`, `payment:cards=yes`, `payment:visa=no`. */
+    private getMultiValueRow(
+        preset: Preset,
+        tags: Record<string, string | number>
+    ): ObjectSummaryRow {
+        const language = this.configService.config().languageTags
+        const optionKeys = (preset.options ?? []).map((option) =>
+            multiValueKey(preset, option.v)
+        )
+        const prefixLength = isPrefixPreset(preset)
+            ? (preset.key ?? '').length
+            : 0
+        const rank = (key: string): number => {
+            const index = optionKeys.indexOf(key)
+            return index === -1 ? Number.MAX_SAFE_INTEGER : index
+        }
+        const coveredTags = Object.entries(tags)
+            .filter(
+                ([key, value]) =>
+                    value !== '' &&
+                    value !== undefined &&
+                    isCoveredByPreset(preset, key)
+            )
+            .sort(([leftKey], [rightKey]) => rank(leftKey) - rank(rightKey))
+        const chosen: string[] = []
+        const others: string[] = []
+        for (const [key, value] of coveredTags) {
+            const option = preset.options?.[optionKeys.indexOf(key)]
+            const label =
+                option?.lbl?.[language] ||
+                option?.lbl?.['en'] ||
+                key.slice(prefixLength)
+            const text = String(value).trim()
+            if (text === 'yes') {
+                chosen.push(label)
+            } else {
+                others.push(
+                    this.translate.instant(
+                        'MAIN.SELECTION.FIELDS.OPTION_VALUE',
+                        {
+                            label,
+                            value: this.getMultiValueText(text),
+                        }
+                    )
+                )
+            }
+        }
+        const codeLabel = isPrefixPreset(preset)
+            ? `${preset.key}*`
+            : (preset.keys ?? []).join(' · ')
+        return {
+            key: codeLabel,
+            icon: 'sell',
+            isOpeningHours: false,
+            label: preset.lbl?.[language] || preset.lbl?.['en'] || codeLabel,
+            value: [...chosen, ...others].join(', '),
+        }
+    }
+
+    private getMultiValueText(value: string): string {
+        if (value === 'no') {
+            return this.translate.instant('MAIN.SELECTION.FIELDS.VALUE_NO')
+        }
+        if (value === 'only') {
+            return this.translate.instant('MAIN.SELECTION.FIELDS.VALUE_ONLY')
+        }
+        return value
     }
 
     private resolveUserLocale(): string {

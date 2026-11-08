@@ -5,18 +5,20 @@ import {
     computed,
     DestroyRef,
     type ElementRef,
+    effect,
     HostListener,
     inject,
     type OnDestroy,
     type OnInit,
     signal,
+    untracked,
     viewChild,
 } from '@angular/core'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { MatDialog } from '@angular/material/dialog'
 import { MatSnackBar } from '@angular/material/snack-bar'
 import { ActivatedRoute, Router, RouterOutlet } from '@angular/router'
-import { SwUpdate, type VersionReadyEvent } from '@angular/service-worker'
+import { SwUpdate } from '@angular/service-worker'
 import { OsmAuthService } from '@app/services/osm-auth.service'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
@@ -39,15 +41,30 @@ import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { InitService } from '@services/init.service'
 import { LocationService } from '@services/location.service'
-import { MapService } from '@services/map.service'
+import { MapService, MIN_DOWNLOAD_ZOOM } from '@services/map.service'
 import { requireMapDataResult } from '@services/osm-data-validation'
 import { OsmApiService } from '@services/osmApi.service'
 import { OverlayNavigationService } from '@services/overlay-navigation.service'
 import { TagsService } from '@services/tags.service'
 import type { BBox } from 'geojson'
 import { LngLat, type MapGeoJSONFeature } from 'maplibre-gl'
-import { EMPTY, from, type Observable, take, timer } from 'rxjs'
-import { catchError, filter, finalize, map, switchMap } from 'rxjs/operators'
+import {
+    EMPTY,
+    from,
+    fromEvent,
+    type Observable,
+    type Subscription,
+    take,
+    timer,
+} from 'rxjs'
+import {
+    catchError,
+    filter,
+    finalize,
+    map,
+    switchMap,
+    throttleTime,
+} from 'rxjs/operators'
 import { MapControlsComponent } from './map-controls/map-controls'
 import {
     ObjectSheetComponent,
@@ -55,6 +72,9 @@ import {
 } from './object-sheet/object-sheet'
 
 type OverlaySize = 'compact' | 'standard' | 'wide'
+
+const UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000
+const LINKED_OBJECT_ZOOM = 20
 
 interface RouteOverlayContent {
     canCloseOverlay?: () => boolean
@@ -88,6 +108,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     private readonly osmAuthService = inject(OsmAuthService)
     private readonly route = inject(ActivatedRoute)
     private readonly destroyRef = inject(DestroyRef)
+    private destroyed = false
     private readonly dialog = inject(MatDialog)
     private readonly snackBar = inject(MatSnackBar)
     private readonly overlayNavigation = inject(OverlayNavigationService)
@@ -143,19 +164,48 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     }
     private resizeObserver?: ResizeObserver
     private backButtonListener?: PluginListenerHandle
+    private resumeListener?: PluginListenerHandle
+    private reloadPromptOpen = false
+    private mapReady = false
+    /** The linked object (`?id=`) whose position is still being looked up. */
+    private linkedObjectPending = false
+    private lateLinkedObject?: { lon: number; lat: number }
+    private linkedObjectDownload?: Subscription
     private activeOverlayContent?: RouteOverlayContent
     private readonly handlePopState = (): void => {
+        if (this.overlayOpen()) return
         this.closeInternalState()
     }
 
     private closeInternalState(): boolean {
+        const openDialogs = this.dialog.openDialogs
+        if (openDialogs.length > 0) {
+            const dialog = openDialogs[openDialogs.length - 1]
+            const instance = dialog.componentInstance as {
+                cancel?: () => void
+            } | null
+            if (typeof instance?.cancel === 'function') instance.cancel()
+            else dialog.close()
+            return true
+        }
         if (this.overlayOpen()) {
             this.closeOverlay()
             return true
-        } else if (this.menuIsOpen()) {
+        }
+        if (this.menuIsOpen()) {
             this.closeMenu()
             return true
-        } else if (this.selectedFeature()) {
+        }
+        if (this.objectSheet()?.closeCategory()) return true
+        if (this.mapService.markerMoveMoving()) {
+            this.mapService.cancelNewPosition()
+            return true
+        }
+        if (this.mapService.markerMoving()) {
+            this.mapService.cancelNewMarker()
+            return true
+        }
+        if (this.selectedFeature()) {
             this.objectSheet()?.requestExit()
             return true
         }
@@ -168,6 +218,18 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     // authType = this.platform.platforms().includes('hybrid') ? 'basic' : 'oauth'
 
     constructor() {
+        this.overlayNavigation.installCloseGuard()
+        effect(() => {
+            if (this.dataService.externalStateChange()) {
+                this.presentReloadPrompt('MAIN.SW.EXTERNAL_STATE', 0)
+            }
+        })
+        effect(() => {
+            const coordinates = this.initService.lateLinkedObjectCoords()
+            if (coordinates) {
+                untracked(() => this.showLateLinkedObject(coordinates))
+            }
+        })
         this.mapService.featureChoiceRequested$
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((features) => {
@@ -323,17 +385,73 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
 
         if (!Capacitor.isNativePlatform() && this.swUpdate.isEnabled) {
             this.swUpdate.versionUpdates
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe((event) => {
+                    if (event.type === 'VERSION_READY') {
+                        this.newVersion.set(true)
+                    } else if (event.type === 'VERSION_INSTALLATION_FAILED') {
+                        this.presentReloadPrompt(
+                            'MAIN.SW.INSTALLATION_FAILED',
+                            10_000
+                        )
+                    }
+                })
+            this.swUpdate.unrecoverable
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe(() => {
+                    this.presentReloadPrompt('MAIN.SW.UNRECOVERABLE', 0)
+                })
+            fromEvent(document, 'visibilitychange')
                 .pipe(
-                    filter(
-                        (evt): evt is VersionReadyEvent =>
-                            evt.type === 'VERSION_READY'
-                    ),
+                    filter(() => document.visibilityState === 'visible'),
+                    throttleTime(UPDATE_CHECK_INTERVAL_MS),
                     takeUntilDestroyed(this.destroyRef)
                 )
                 .subscribe(() => {
-                    this.newVersion.set(true)
+                    this.swUpdate.checkForUpdate().catch((error: unknown) => {
+                        console.warn('Update check failed.', error)
+                    })
                 })
         }
+    }
+
+    /** A prompt without duration stays until the app reloads, even when another message covers it. */
+    private presentReloadPrompt(messageKey: string, duration: number): void {
+        if (this.reloadPromptOpen) return
+        this.reloadPromptOpen = true
+        const snackBarRef = this.snackBar.open(
+            this.translate.instant(messageKey),
+            this.translate.instant('MAIN.SW.RELOAD'),
+            { duration, verticalPosition: 'top' }
+        )
+        snackBarRef
+            .onAction()
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => this.reloadApplication())
+        snackBarRef
+            .afterDismissed()
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe(({ dismissedByAction }) => {
+                this.reloadPromptOpen = false
+                if (duration === 0 && !dismissedByAction && !this.destroyed) {
+                    this.whenSnackBarFree(() =>
+                        this.presentReloadPrompt(messageKey, duration)
+                    )
+                }
+            })
+    }
+
+    /** Runs `show` once no other message is on screen. */
+    private whenSnackBarFree(show: () => void): void {
+        const current = this.snackBar._openedSnackBarRef
+        if (!current) {
+            show()
+            return
+        }
+        current
+            .afterDismissed()
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => this.whenSnackBarFree(show))
     }
 
     private tryHandleAuthCallback(): void {
@@ -497,11 +615,14 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
 
         dialogRef.afterClosed().subscribe((feature) => {
             if (feature) {
+                const previousStack = this.stackedFeatures()
                 this.stackedFeatures.set({
                     features,
                     index: features.indexOf(feature),
                 })
-                this.mapService.selectFeature(feature)
+                if (!this.mapService.selectFeature(feature)) {
+                    this.stackedFeatures.set(previousStack)
+                }
             }
         })
     }
@@ -515,11 +636,20 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         const stack = this.stackedFeatures()
         if (!stack) return
         const count = stack.features.length
-        const index = (stack.index + step + count) % count
-        this.stackedFeatures.set({ ...stack, index })
         this.browsingStack = true
-        this.mapService.selectFeature(stack.features[index])
-        this.browsingStack = false
+        try {
+            for (let offset = 1; offset <= count; offset++) {
+                const index =
+                    (((stack.index + step * offset) % count) + count) % count
+                this.stackedFeatures.set({ ...stack, index })
+                if (this.mapService.selectFeature(stack.features[index])) {
+                    return
+                }
+            }
+            this.stackedFeatures.set(stack)
+        } finally {
+            this.browsingStack = false
+        }
     }
 
     private isCurrentStackedFeature(data: EventShowModal): boolean {
@@ -580,10 +710,16 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
             )
             this.readBeforeEdit.set(null)
             this.sheetLevel.set(this.readSheetLevel())
+            return
         }
 
         if (data.redraw) {
-            this.mapService.redrawMarkers(this.dataService.getGeojson())
+            if (
+                selection.origineData === 'data' ||
+                data.origineData === 'data'
+            ) {
+                this.mapService.redrawMarkers(this.dataService.getGeojson())
+            }
             this.mapService.redrawChangedMarkers(
                 this.dataService.getGeojsonChanged()
             )
@@ -592,6 +728,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     }
 
     presentConfirm(): void {
+        if (this.dialog.openDialogs.length > 0) return
         const data: ConfirmDialogData = {
             title: this.translate.instant('MAIN.EXIT_CONFIRM_HEADER'),
             message: this.translate.instant('MAIN.EXIT_CONFIRM_MESSAGE'),
@@ -619,7 +756,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     }
 
     loadData$(): Observable<void> {
-        this.mapService.setIsProcessing(true)
+        this.mapService.setIsDownloading(true)
         this.alertService.displayToolTipRefreshData = false
 
         const bbox: BBox = this.mapService.getBbox()
@@ -638,10 +775,14 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                         })
                     ).pipe(
                         map(() => {
+                            // The stored state keeps pending objects and newer versions.
                             this.mapService.redrawBbox(
-                                validatedData.geojsonBbox
+                                this.dataService.getGeojsonBbox()
                             )
-                            this.mapService.redrawMarkers(validatedData.geojson)
+                            this.mapService.redrawMarkers(
+                                this.dataService.getGeojson(),
+                                { replace: true }
+                            )
                         })
                     )
                 }),
@@ -651,7 +792,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                     void this.presentToast(this.getErrorMessage(error))
                     return EMPTY
                 }),
-                finalize(() => this.mapService.setIsProcessing(false))
+                finalize(() => this.mapService.setIsDownloading(false))
             )
     }
 
@@ -682,7 +823,10 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
             )
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
-                next: ({ config }) => {
+                next: ({ config, objectOnStartCoords }) => {
+                    this.linkedObjectPending =
+                        this.idOsmObjectOnStart !== undefined &&
+                        !objectOnStartCoords
                     this.initialDataLoaded = true
                     this.tryHandleAuthCallback()
                     this.refreshStoredAuthentication()
@@ -697,6 +841,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         this.mapService.mapLoaded$
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe(() => {
+                this.mapReady = true
                 if (this.addOsmObjectOnStart) {
                     this.mapService.openModalOsm(
                         this.addOsmObjectOnStart.coords,
@@ -704,28 +849,24 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                     )
                 }
 
-                if (this.loadOsmDataOnStart) {
-                    this.loadData$()
+                const lateLinkedObject = this.lateLinkedObject
+                if (lateLinkedObject) {
+                    this.showLateLinkedObject(lateLinkedObject)
+                } else if (this.loadOsmDataOnStart) {
+                    this.linkedObjectDownload = this.loadData$()
                         .pipe(take(1), takeUntilDestroyed(this.destroyRef))
                         .subscribe({
-                            next: () => this.openRequestedObject(),
+                            next: () =>
+                                this.openRequestedObject(
+                                    !this.linkedObjectPending
+                                ),
                         })
                 }
                 timer(2000)
                     .pipe(take(1), takeUntilDestroyed(this.destroyRef))
-                    .subscribe(() => {
-                        const featureCount =
-                            this.dataService.getGeojson().features.length
-                        if (featureCount > 0) {
-                            this.alertService.showAlert(
-                                `${featureCount} ${this.translate.instant(
-                                    'MAIN.START_SNACK_ITEMS_IN_MEMORY'
-                                )}`
-                            )
-                        } else {
-                            this.alertService.requestRefreshTooltip()
-                        }
-                    })
+                    .subscribe(() =>
+                        this.whenSnackBarFree(() => this.presentStartupHint())
+                    )
             })
 
         this.alertService.displayRefreshTooltip$
@@ -740,16 +881,34 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                     .onAction()
                     .pipe(take(1), takeUntilDestroyed(this.destroyRef))
                     .subscribe(() => {
-                        if (this.mapService.map.getZoom() > 16) {
-                            this.loadData$()
-                                .pipe(
-                                    take(1),
-                                    takeUntilDestroyed(this.destroyRef)
+                        if (!this.mapReady || this.mapService.isBusy()) return
+                        if (this.mapService.map.getZoom() < MIN_DOWNLOAD_ZOOM) {
+                            this.alertService.showAlert(
+                                this.translate.instant(
+                                    'MAIN.BUTTONS.REFRESH_ZOOM_HINT'
                                 )
-                                .subscribe()
+                            )
+                            return
                         }
+                        this.loadData()
                     })
             })
+
+        this.locationService.permissionDenied$
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => {
+                void this.presentToast(
+                    this.translate.instant('MAIN.LOCATION.DENIED')
+                )
+            })
+        fromEvent(document, 'visibilitychange')
+            .pipe(
+                filter(() => document.visibilityState === 'visible'),
+                takeUntilDestroyed(this.destroyRef)
+            )
+            .subscribe(() =>
+                this.locationService.resumeGeolocationInForeground()
+            )
 
         window.addEventListener('popstate', this.handlePopState)
         void CapacitorApp.addListener('backButton', () => {
@@ -757,7 +916,14 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 this.presentConfirm()
             }
         }).then((listener) => {
-            this.backButtonListener = listener
+            if (this.destroyed) void listener.remove()
+            else this.backButtonListener = listener
+        })
+        void CapacitorApp.addListener('resume', () => {
+            this.locationService.resumeGeolocationInForeground()
+        }).then((listener) => {
+            if (this.destroyed) void listener.remove()
+            else this.resumeListener = listener
         })
     }
 
@@ -770,18 +936,65 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     }
 
     async resetStartupData(): Promise<void> {
-        await this.initService.resetFatalResource()
-        this.reloadApplication()
+        if (await this.initService.resetFatalResource()) {
+            this.reloadApplication()
+            return
+        }
+        this.presentToast(this.translate.instant('MAIN.STARTUP.RESET_FAILED'))
     }
 
     ngOnDestroy(): void {
+        this.destroyed = true
         this.resizeObserver?.disconnect()
         void this.backButtonListener?.remove()
+        void this.resumeListener?.remove()
         window.removeEventListener('popstate', this.handlePopState)
         this.mapService.destroyMap()
     }
 
-    private openRequestedObject(): void {
+    /** The start hint would cover the sheet or a page opened meanwhile. */
+    private presentStartupHint(): void {
+        if (this.selectedFeature() || this.overlayOpen() || this.menuIsOpen()) {
+            return
+        }
+        const featureCount = this.dataService.getGeojson().features.length
+        if (featureCount > 0) {
+            this.alertService.showAlert(
+                `${featureCount} ${this.translate.instant(
+                    'MAIN.START_SNACK_ITEMS_IN_MEMORY'
+                )}`
+            )
+        } else {
+            this.alertService.requestRefreshTooltip()
+        }
+    }
+
+    /**
+     * The linked object was found after the map started elsewhere: shows its
+     * area, downloads it, then opens the object.
+     */
+    private showLateLinkedObject(coordinates: {
+        lon: number
+        lat: number
+    }): void {
+        if (!this.idOsmObjectOnStart) return
+        if (!this.mapReady) {
+            this.lateLinkedObject = coordinates
+            return
+        }
+        this.lateLinkedObject = undefined
+        this.linkedObjectPending = false
+        this.linkedObjectDownload?.unsubscribe()
+        this.mapService.focusOn({
+            center: [coordinates.lon, coordinates.lat],
+            zoom: LINKED_OBJECT_ZOOM,
+        })
+        this.linkedObjectDownload = this.loadData$()
+            .pipe(take(1), takeUntilDestroyed(this.destroyRef))
+            .subscribe({ next: () => this.openRequestedObject(true) })
+    }
+
+    private openRequestedObject(reportMissing: boolean): void {
         if (!this.idOsmObjectOnStart) {
             return
         }
@@ -800,7 +1013,11 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         }
 
         if (!feature) {
-            void this.presentToast('Object not found in downloaded data.')
+            if (reportMissing) {
+                this.presentToast(
+                    this.translate.instant('MAIN.LINKED_OBJECT_NOT_FOUND')
+                )
+            }
             return
         }
         this.mapService.showModal({

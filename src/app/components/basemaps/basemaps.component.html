@@ -10,52 +10,85 @@
                 {{ 'SETTINGS.AERIAL_IMAGERY_HINT' | translate }}
             </p>
 
-            @if (basemaps().length === 0) {
-                <div class="loading-state" role="status">
-                    <mat-spinner diameter="32"></mat-spinner>
-                </div>
-            } @else {
-                <div class="basemap-grid" role="list">
-                    @for (bm of basemaps(); track bm.id) {
+            @switch (state().status) {
+                @case ('loading') {
+                    <div class="loading-state" role="status">
+                        <mat-spinner diameter="32"></mat-spinner>
+                    </div>
+                }
+                @case ('error') {
+                    <div class="loading-state" role="alert">
+                        <p>{{ 'SETTINGS.AERIAL_IMAGERY_ERROR' | translate }}</p>
                         <button
-                            class="basemap-card"
+                            mat-stroked-button
                             type="button"
-                            role="listitem"
-                            matRipple
-                            [class.is-selected]="
-                                bm.id === configService.config().basemap.id
-                            "
-                            [attr.aria-pressed]="
-                                bm.id === configService.config().basemap.id
-                            "
-                            (click)="selectBaseMap(bm)"
+                            (click)="retry()"
                         >
-                            <span class="basemap-card__topline">
-                                <span>{{ bm.category }} {{ bm.end_date }}</span>
-                                @if (
-                                    bm.id === configService.config().basemap.id
-                                ) {
-                                    <mat-icon
-                                        fontSet="material-symbols-rounded"
-                                        aria-hidden="true"
-                                        >check_circle</mat-icon
-                                    >
-                                }
-                            </span>
-                            <strong>{{ bm.name }}</strong>
-                            @if (bm.description) {
-                                <span class="basemap-card__description">{{
-                                    bm.description
-                                }}</span>
-                            }
-                            @if (bm.attribution?.text) {
-                                <span class="basemap-card__attribution">{{
-                                    bm.attribution?.text
-                                }}</span>
-                            }
+                            {{ 'SHARED.RETRY' | translate }}
                         </button>
+                    </div>
+                }
+                @default {
+                    @if (basemaps().length === 0) {
+                        <div class="loading-state" role="status">
+                            <p>{{ 'SHARED.NO_RESULTS' | translate }}</p>
+                        </div>
+                    } @else {
+                        <ul class="basemap-grid" role="list">
+                            @for (bm of basemaps(); track bm.id) {
+                                <li>
+                                    <button
+                                        class="basemap-card"
+                                        type="button"
+                                        matRipple
+                                        [class.is-selected]="
+                                            bm.id ===
+                                            configService.config().basemap.id
+                                        "
+                                        [attr.aria-pressed]="
+                                            bm.id ===
+                                            configService.config().basemap.id
+                                        "
+                                        (click)="selectBaseMap(bm)"
+                                    >
+                                        <span class="basemap-card__topline">
+                                            <span
+                                                >{{ bm.category }}
+                                                {{ bm.end_date }}</span
+                                            >
+                                            @if (
+                                                bm.id ===
+                                                configService.config().basemap
+                                                    .id
+                                            ) {
+                                                <mat-icon
+                                                    fontSet="material-symbols-rounded"
+                                                    aria-hidden="true"
+                                                    >check_circle</mat-icon
+                                                >
+                                            }
+                                        </span>
+                                        <strong>{{ bm.name }}</strong>
+                                        @if (bm.description) {
+                                            <span
+                                                class="basemap-card__description"
+                                                >{{ bm.description }}</span
+                                            >
+                                        }
+                                        @if (bm.attribution?.text) {
+                                            <span
+                                                class="basemap-card__attribution"
+                                                >{{
+                                                    bm.attribution?.text
+                                                }}</span
+                                            >
+                                        }
+                                    </button>
+                                </li>
+                            }
+                        </ul>
                     }
-                </div>
+                }
             }
         </div>
     }

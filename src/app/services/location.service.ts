@@ -14,13 +14,27 @@ const EMPTY_COMPASS_HEADING: CompassHeading = {
     timestamp: null,
 }
 
-const GEOLOCATION_TIMEOUT_MS = 15_000
+const GEOLOCATION_OPTIONS: PositionOptions = {
+    enableHighAccuracy: true,
+    maximumAge: 10_000,
+    timeout: 15_000,
+}
+const POSITION_ERROR_PERMISSION_DENIED = 1
+const POSITION_ERROR_TIMEOUT = 3
+/** `visibilitychange` and the Capacitor `resume` event both announce a return. */
+const FOREGROUND_RESUME_INTERVAL_MS = 1_000
 const DEFAULT_ACCURACY_CIRCLE_POINTS = 64
 const MAX_ACCURACY_CIRCLE_POINTS = 4096
 
 type DeviceOrientationPermission = typeof DeviceOrientationEvent & {
     requestPermission?: () => Promise<'granted' | 'denied'>
 }
+
+type WebkitDeviceOrientationEvent = DeviceOrientationEvent & {
+    webkitCompassHeading?: number
+}
+
+export type GeolocationIssue = 'denied' | 'unavailable' | 'timeout'
 
 export type OrientationPermissionState =
     | 'unknown'
@@ -56,9 +70,17 @@ export class LocationService {
         signal<OrientationPermissionState>('unknown')
     readonly orientationPermission =
         this.orientationPermissionState.asReadonly()
+    private readonly geolocationIssueState = signal<GeolocationIssue | null>(
+        null
+    )
+    readonly geolocationIssue = this.geolocationIssueState.asReadonly()
+    private readonly permissionDeniedSubject = new Subject<void>()
+    readonly permissionDenied$ = this.permissionDeniedSubject.asObservable()
 
     private watchId?: number
+    private lastForegroundResume = Number.NEGATIVE_INFINITY
     private geolocationSession = 0
+    private geolocationActive = false
     private orientationEventName?:
         | 'deviceorientationabsolute'
         | 'deviceorientation'
@@ -66,55 +88,104 @@ export class LocationService {
     watchPosition(): void {
         const session = this.geolocationSession
         if (this.watchId !== undefined) {
-            navigator.geolocation.clearWatch(this.watchId)
+            navigator.geolocation?.clearWatch(this.watchId)
+            this.watchId = undefined
+        }
+        if (!navigator.geolocation) {
+            this.geolocationIssueState.set('unavailable')
+            return
         }
         this.watchId = navigator.geolocation.watchPosition(
             (position: GeolocationPosition) => {
-                if (session === this.geolocationSession && position?.coords) {
-                    this.gpsReadyState.set(this.setLocation(position))
+                if (session !== this.geolocationSession || !position?.coords) {
+                    return
+                }
+                const hadPosition = this.gpsReadyState()
+                const validPosition = this.setLocation(position)
+                this.gpsReadyState.set(validPosition)
+                if (!validPosition) return
+                this.geolocationIssueState.set(null)
+                if (!hadPosition) this.locationReadySubject.next(position)
+            },
+            (error: GeolocationPositionError) => {
+                if (session === this.geolocationSession) {
+                    this.handleGeolocationError(error)
                 }
             },
-            (err) => {
-                if (session !== this.geolocationSession) return
-                console.error(err)
-                this.clearLocation()
-            },
-            { enableHighAccuracy: true, timeout: GEOLOCATION_TIMEOUT_MS }
+            GEOLOCATION_OPTIONS
         )
     }
 
-    getCurrentPosition(): Promise<GeolocationPosition> {
-        return new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(
-                (position: GeolocationPosition) => {
-                    resolve(position)
-                },
-                (err) => {
-                    reject(err)
-                },
-                { enableHighAccuracy: true, timeout: GEOLOCATION_TIMEOUT_MS }
-            )
+    enableGeolocation(): void {
+        this.geolocationSession++
+        this.geolocationActive = true
+        this.geolocationIssueState.set(null)
+        this.heading()
+        this.watchPosition()
+    }
+
+    /** Restarts the watch when the user asks again. */
+    resumeGeolocation(): void {
+        if (this.geolocationActive) this.watchPosition()
+    }
+
+    /**
+     * Restarts the watch once when the app returns to the foreground. A denied
+     * permission is asked again only if it was granted in the settings
+     * meanwhile: the app would otherwise prompt on every return.
+     */
+    resumeGeolocationInForeground(): void {
+        const now = Date.now()
+        if (now - this.lastForegroundResume < FOREGROUND_RESUME_INTERVAL_MS) {
+            return
+        }
+        this.lastForegroundResume = now
+        if (!this.geolocationActive) return
+        if (this.geolocationIssueState() !== 'denied') {
+            this.watchPosition()
+            return
+        }
+        const session = this.geolocationSession
+        void this.isGeolocationGranted().then((granted) => {
+            if (
+                granted &&
+                session === this.geolocationSession &&
+                this.geolocationIssueState() === 'denied'
+            ) {
+                this.watchPosition()
+            }
         })
     }
 
-    enableGeolocation(): void {
-        const session = ++this.geolocationSession
-        this.heading()
-        void this.getCurrentPosition()
-            .then((position: GeolocationPosition) => {
-                if (session !== this.geolocationSession) return
-                const validPosition = this.setLocation(position)
-                this.gpsReadyState.set(validPosition)
-                if (validPosition) this.locationReadySubject.next(position)
-                this.watchPosition()
+    private async isGeolocationGranted(): Promise<boolean> {
+        try {
+            const status = await navigator.permissions?.query({
+                name: 'geolocation',
             })
-            .catch(() => {
-                if (session === this.geolocationSession) this.clearLocation()
-            })
+            return status?.state === 'granted'
+        } catch {
+            return false
+        }
+    }
+
+    private handleGeolocationError(error: GeolocationPositionError): void {
+        if (error.code === POSITION_ERROR_PERMISSION_DENIED) {
+            const wasDenied = this.geolocationIssueState() === 'denied'
+            this.geolocationIssueState.set('denied')
+            this.clearLocation()
+            if (!wasDenied) this.permissionDeniedSubject.next()
+            return
+        }
+        const issue =
+            error.code === POSITION_ERROR_TIMEOUT ? 'timeout' : 'unavailable'
+        if (this.geolocationIssueState() !== issue) console.warn(error)
+        this.geolocationIssueState.set(issue)
     }
 
     disableGeolocation(): void {
         this.geolocationSession++
+        this.geolocationActive = false
+        this.geolocationIssueState.set(null)
         if (this.watchId !== undefined) {
             navigator.geolocation.clearWatch(this.watchId)
             this.watchId = undefined
@@ -191,9 +262,17 @@ export class LocationService {
         const heading =
             ((Math.atan2(rA, rB) * 180) / Math.PI + screenAngle + 360) % 360
 
+        const webkitHeading = (event as WebkitDeviceOrientationEvent)
+            .webkitCompassHeading
+        const webkitScreenHeading =
+            !event.absolute &&
+            typeof webkitHeading === 'number' &&
+            Number.isFinite(webkitHeading)
+                ? (webkitHeading + screenAngle + 360) % 360
+                : null
         const newCompassHeading: CompassHeading = {
-            magneticHeading: heading,
-            trueHeading: event.absolute ? heading : null,
+            magneticHeading: webkitScreenHeading ?? heading,
+            trueHeading: event.absolute ? heading : webkitScreenHeading,
             headingAccuracy: null,
             timestamp: Date.now(),
         }

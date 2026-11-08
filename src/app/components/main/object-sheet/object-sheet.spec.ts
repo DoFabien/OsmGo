@@ -3,18 +3,30 @@ import { TestBed } from '@angular/core/testing'
 import { MatDialog } from '@angular/material/dialog'
 import { MatSnackBar } from '@angular/material/snack-bar'
 import { By } from '@angular/platform-browser'
-import { TranslateModule } from '@ngx-translate/core'
-import type { EventShowModal } from '@osmgo/type'
+import { TranslateModule, TranslateService } from '@ngx-translate/core'
+import type { EventShowModal, Preset, TagConfig } from '@osmgo/type'
 import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { MapService } from '@services/map.service'
 import { OsmApiService } from '@services/osmApi.service'
 import { TagsService } from '@services/tags.service'
 import { of } from 'rxjs'
-
 import { IconComponent } from '../../icon/icon.component'
 import { ObjectEditorContentComponent } from '../../modal/modal'
+import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog'
 import { ObjectSheetComponent } from './object-sheet'
+
+const catalogPresets: Record<
+    string,
+    Preset
+> = require('../../../../assets/tagsAndPresets/presets.json')
+for (const [id, preset] of Object.entries(catalogPresets)) {
+    preset._id = id
+}
+const catalogTags: {
+    primaryKeys: string[]
+    tags: TagConfig[]
+} = require('../../../../assets/tagsAndPresets/tags.json')
 
 describe('ObjectSheetComponent swipes', () => {
     const dialog = {
@@ -22,6 +34,8 @@ describe('ObjectSheetComponent swipes', () => {
     }
     let bookmarksIds: ReturnType<typeof signal<string[]>>
     let surveyDisplay: 'always' | 'never' | 'when_older'
+    let checkedKey: 'survey:date' | 'check_date'
+    let presets: Record<string, unknown>
     let mapProcessing: ReturnType<typeof signal<boolean>>
     let mapService: {
         isProcessing: typeof mapProcessing
@@ -37,6 +51,7 @@ describe('ObjectSheetComponent swipes', () => {
     }
     let tagsService: {
         tags: ReturnType<typeof vi.fn>
+        tagsById: () => Record<string, TagConfig>
         presets: ReturnType<typeof vi.fn>
         jsonSprites: ReturnType<typeof vi.fn>
         primaryKeys: ReturnType<typeof vi.fn>
@@ -99,6 +114,8 @@ describe('ObjectSheetComponent swipes', () => {
     beforeEach(() => {
         bookmarksIds = signal<string[]>([])
         surveyDisplay = 'never'
+        checkedKey = 'survey:date'
+        presets = {}
         mapProcessing = signal(false)
         mapService = {
             isProcessing: mapProcessing,
@@ -116,7 +133,14 @@ describe('ObjectSheetComponent swipes', () => {
         }
         tagsService = {
             tags: vi.fn(() => []),
-            presets: vi.fn(() => ({})),
+            tagsById: () =>
+                Object.fromEntries(
+                    (tagsService.tags as () => TagConfig[])().map((tag) => [
+                        tag.id,
+                        tag,
+                    ])
+                ),
+            presets: vi.fn(() => presets),
             jsonSprites: vi.fn(() => ({})),
             primaryKeys: vi.fn(() => ['amenity']),
             bookmarksIds,
@@ -150,7 +174,7 @@ describe('ObjectSheetComponent swipes', () => {
                     provide: ConfigService,
                     useValue: {
                         config: () => ({
-                            checkedKey: 'survey:date',
+                            checkedKey,
                             countryTags: 'FR',
                             languageTags: 'fr',
                             languageUi: 'fr',
@@ -184,6 +208,20 @@ describe('ObjectSheetComponent swipes', () => {
         component.onSheetTouchEnd(touchEndAt(210))
 
         expect(levelChange).not.toHaveBeenCalled()
+    })
+
+    it('names the category found for the object rather than the one of its main tag', () => {
+        tagsService.tags.mockReturnValue([
+            { id: 'amenity/bench', lbl: { fr: 'Banc' } },
+            { id: 'amenity/bench/memorial', lbl: { fr: 'Banc commémoratif' } },
+        ])
+        const fixture = TestBed.createComponent(ObjectSheetComponent)
+        const selection = selectionWith(1, 'information', '#9d7178')
+        selection.geojson.properties.configId = 'amenity/bench/memorial'
+        fixture.componentRef.setInput('selection', selection)
+        fixture.componentRef.setInput('level', 'medium')
+
+        expect(fixture.componentInstance.category()).toBe('Banc commémoratif')
     })
 
     it('protects a creation draft before closing the sheet', () => {
@@ -669,5 +707,382 @@ describe('ObjectSheetComponent swipes', () => {
 
         expect(secondaryMetadata.textContent?.trim()).toBe('v1')
         expect(secondaryMetadata.querySelector('time')).toBeNull()
+    })
+
+    describe('external links', () => {
+        const linkFor = (value: string) => {
+            presets = { website: { type: 'url', lbl: { en: 'Website' } } }
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            const selection = selectionWith(1, 'information', '#9d7178')
+            selection.geojson.properties.tags = {
+                amenity: 'bench',
+                website: value,
+            }
+            fixture.componentRef.setInput('selection', selection)
+            fixture.detectChanges()
+            return {
+                anchor: fixture.nativeElement.querySelector(
+                    '.fact-row a'
+                ) as HTMLAnchorElement | null,
+                row: fixture.componentInstance
+                    .rows()
+                    .find((candidate) => candidate.key === 'website'),
+            }
+        }
+
+        it('links a website on another host', () => {
+            const { anchor, row } = linkFor('https://example.com')
+
+            expect(row?.href).toBe('https://example.com')
+            expect(anchor?.getAttribute('href')).toBe('https://example.com')
+        })
+
+        it.each([
+            'https://localhost/_capacitor_http_interceptor_?u=https://evil.test/x',
+            'http://127.0.0.1/page',
+            'javascript:alert(1)',
+            'osmgo://auth',
+            'not a link',
+        ])('shows %s as plain text', (value) => {
+            const { anchor, row } = linkFor(value)
+
+            expect(row?.href).toBeUndefined()
+            expect(row?.value).toBe(value)
+            expect(anchor).toBeNull()
+        })
+    })
+
+    describe('survey confirmation', () => {
+        const confirmSurvey = (tags: Record<string, string>) => {
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            const selection = selectionWith(1, 'information', '#9d7178')
+            selection.geojson.properties.tags = { amenity: 'bench', ...tags }
+            fixture.componentRef.setInput('selection', selection)
+            fixture.detectChanges()
+            fixture.componentInstance.handleSurveyYes()
+            return osmApi.updateOsmElement.mock.calls[0][0].properties.tags
+        }
+        const today = expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)
+
+        it('dates the configured key and leaves the other key out when it was absent', () => {
+            expect(confirmSurvey({})).toEqual({
+                amenity: 'bench',
+                'survey:date': today,
+            })
+        })
+
+        it('keeps the other date key and brings it to the same day', () => {
+            const tags = confirmSurvey({ check_date: '2020-01-01' })
+
+            expect(tags['check_date']).toEqual(today)
+            expect(tags['check_date']).toBe(tags['survey:date'])
+        })
+
+        it('works the same way when check_date is the configured key', () => {
+            checkedKey = 'check_date'
+
+            const tags = confirmSurvey({ 'survey:date': '2019-05-05' })
+
+            expect(tags['check_date']).toEqual(today)
+            expect(tags['survey:date']).toBe(tags['check_date'])
+        })
+
+        it('never removes other tags', () => {
+            const tags = confirmSurvey({
+                'survey:date': '2018-01-01',
+                name: 'A',
+            })
+
+            expect(tags['name']).toBe('A')
+            expect(tags['amenity']).toBe('bench')
+        })
+    })
+
+    describe('discarding local changes', () => {
+        const pendingSheet = (changeType: 'Create' | 'Update' | 'Delete') => {
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            const selection = selectionWith(1, 'information', '#9d7178')
+            selection.geojson.properties.changeType = changeType
+            selection.origineData = 'data_changed'
+            fixture.componentRef.setInput('selection', selection)
+            fixture.detectChanges()
+            return fixture
+        }
+
+        it('labels the banner action as discarding local changes', () => {
+            const fixture = pendingSheet('Update')
+
+            const button = fixture.nativeElement.querySelector(
+                '.sheet-notice--pending button'
+            ) as HTMLButtonElement
+
+            expect(button.textContent).toContain('MAIN.SELECTION.REVERT_LOCAL')
+            expect(button.textContent).not.toContain('SHARED.CLEAR')
+        })
+
+        it.each([
+            ['Update', 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE'],
+            ['Create', 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_CREATED'],
+            ['Delete', 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_DELETED'],
+        ] as const)(
+            'asks for a destructive confirmation before discarding a %s',
+            (changeType, message) => {
+                dialog.open.mockClear()
+                dialog.open.mockReturnValueOnce({
+                    afterClosed: () => of(false),
+                })
+                const fixture = pendingSheet(changeType)
+
+                ;(
+                    fixture.nativeElement.querySelector(
+                        '.sheet-notice--pending button'
+                    ) as HTMLButtonElement
+                ).click()
+
+                expect(dialog.open).toHaveBeenCalledWith(
+                    ConfirmDialogComponent,
+                    expect.objectContaining({
+                        data: expect.objectContaining({
+                            title: 'MAIN.SELECTION.REVERT_LOCAL_TITLE',
+                            message,
+                            confirmLabel: 'MAIN.SELECTION.DISCARD',
+                            destructive: true,
+                        }),
+                    })
+                )
+                expect(dataService.cancelPendingChange).not.toHaveBeenCalled()
+            }
+        )
+
+        it('discards the change only once confirmed', async () => {
+            dialog.open.mockReturnValueOnce({ afterClosed: () => of(true) })
+            const fixture = pendingSheet('Update')
+            const completed = vi.fn()
+            fixture.componentInstance.sessionCompleted.subscribe(completed)
+
+            fixture.componentInstance.confirmCancelChange()
+
+            await vi.waitFor(() => expect(completed).toHaveBeenCalled())
+            expect(dataService.cancelPendingChange).toHaveBeenCalledWith(
+                'node/1'
+            )
+            expect(completed).toHaveBeenCalledWith({
+                redraw: true,
+                deleted: true,
+            })
+        })
+    })
+
+    describe('accessibility', () => {
+        it('lets the keyboard resize the sheet from its handle without double-triggering pointer taps', () => {
+            const component = createComponent('medium')
+            const levelChange = vi.fn()
+            component.levelChange.subscribe(levelChange)
+
+            component.onHandleClick({ detail: 1 } as MouseEvent)
+            expect(levelChange).not.toHaveBeenCalled()
+
+            component.onHandleClick({ detail: 0 } as MouseEvent)
+            expect(levelChange).toHaveBeenCalledWith('expanded')
+        })
+
+        it('names the sheet handle and exposes its state', () => {
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            fixture.componentRef.setInput('level', 'expanded')
+            fixture.componentRef.setInput(
+                'selection',
+                selectionWith(1, 'information', '#9d7178')
+            )
+            fixture.detectChanges()
+
+            const handle = fixture.nativeElement.querySelector(
+                '.sheet-handle'
+            ) as HTMLButtonElement
+
+            expect(handle.getAttribute('aria-label')).toBe(
+                'MAIN.SELECTION.RESIZE_PANEL'
+            )
+            expect(handle.getAttribute('aria-expanded')).toBe('true')
+        })
+
+        it('announces the position in the stack to screen readers', () => {
+            const translate = TestBed.inject(TranslateService)
+            translate.setTranslation('en', {
+                MAIN: {
+                    SELECTION: {
+                        STACK: {
+                            POSITION: '{{index}} / {{count}}, show all',
+                        },
+                    },
+                },
+            })
+            translate.use('en')
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            fixture.componentRef.setInput(
+                'selection',
+                selectionWith(1, 'information', '#9d7178')
+            )
+            fixture.componentRef.setInput('stackPosition', {
+                index: 1,
+                count: 5,
+            })
+            fixture.detectChanges()
+
+            const count = fixture.nativeElement.querySelector(
+                '[data-testid="stack-count"]'
+            ) as HTMLButtonElement
+
+            expect(count.textContent?.trim()).toBe('2 / 5')
+            expect(count.getAttribute('aria-label')).toBe('2 / 5, show all')
+        })
+    })
+
+    describe('category picker', () => {
+        it('closes the picker without applying a category', () => {
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            fixture.componentRef.setInput(
+                'selection',
+                selectionWith(1, 'information', '#9d7178')
+            )
+            const component = fixture.componentInstance
+
+            expect(component.closeCategory()).toBe(false)
+
+            component.openCategory()
+            expect(component.closeCategory()).toBe(true)
+            expect(component.categoryOpen()).toBe(false)
+        })
+    })
+
+    it('goes back to the reading sheet when an existing object is abandoned', () => {
+        const fixture = TestBed.createComponent(ObjectSheetComponent)
+        const selection = selectionWith(1, 'information', '#9d7178')
+        selection.type = 'Update'
+        fixture.componentRef.setInput('selection', selection)
+        const completed = vi.fn()
+        const closed = vi.fn()
+        fixture.componentInstance.sessionCompleted.subscribe(completed)
+        fixture.componentInstance.closeRequested.subscribe(closed)
+
+        fixture.componentInstance.requestExit()
+
+        expect(completed).toHaveBeenCalledWith({ type: 'Cancel' })
+        expect(closed).not.toHaveBeenCalled()
+    })
+
+    describe('fields with several values', () => {
+        const rowsFor = (
+            primaryTag: { key: string; value: string },
+            tags: Record<string, string>
+        ) => {
+            presets = catalogPresets
+            tagsService.tags.mockReturnValue(catalogTags.tags)
+            const translate = TestBed.inject(TranslateService)
+            translate.setTranslation('fr', {
+                MAIN: {
+                    SELECTION: {
+                        FIELDS: {
+                            OPTION_VALUE: '{{label}} : {{value}}',
+                            VALUE_NO: 'non',
+                            VALUE_ONLY: 'uniquement',
+                        },
+                    },
+                },
+            })
+            translate.use('fr')
+            const fixture = TestBed.createComponent(ObjectSheetComponent)
+            const selection = selectionWith(1, 'information', '#9d7178')
+            selection.geojson.properties.primaryTag = primaryTag
+            selection.geojson.properties.tags = {
+                [primaryTag.key]: primaryTag.value,
+                ...tags,
+            }
+            fixture.componentRef.setInput('selection', selection)
+            fixture.detectChanges()
+            return fixture
+        }
+        const readable = (fixture: ReturnType<typeof rowsFor>) =>
+            fixture.componentInstance
+                .rows()
+                .map((row) => [row.label, row.value])
+
+        it('names every value of a semicolon list', () => {
+            const fixture = rowsFor(
+                { key: 'amenity', value: 'restaurant' },
+                { cuisine: 'pizza;italian;not_in_catalog' }
+            )
+
+            expect(readable(fixture)).toEqual([
+                ['Cuisines', 'Pizza, Italienne, not_in_catalog'],
+            ])
+        })
+
+        it('gathers the tags of a key prefix in one row', () => {
+            const fixture = rowsFor(
+                { key: 'shop', value: 'bakery' },
+                {
+                    'payment:visa': 'no',
+                    'payment:cash': 'yes',
+                    'payment:cards': 'only',
+                    'payment:lydia': 'yes',
+                    wheelchair: 'yes',
+                }
+            )
+
+            expect(readable(fixture)).toEqual([
+                [
+                    'Types de paiement',
+                    'Liquide, lydia, Carte de paiement : uniquement, Visa : non',
+                ],
+                ['Accès en fauteuil roulant', 'Oui'],
+            ])
+            expect(
+                fixture.nativeElement.querySelectorAll('.fact-row')
+            ).toHaveLength(2)
+        })
+
+        it('gathers several keys in the row of their field', () => {
+            const fixture = rowsFor(
+                { key: 'amenity', value: 'toilets' },
+                { male: 'yes', female: 'yes' }
+            )
+
+            expect(readable(fixture)).toEqual([['Genre', 'Homme, Femme']])
+        })
+
+        it('gathers a key prefix that the category does not list', () => {
+            const fixture = rowsFor(
+                { key: 'amenity', value: 'toilets' },
+                { 'diet:vegan': 'yes' }
+            )
+
+            expect(readable(fixture)).toEqual([
+                ['Options alimentaires', 'Végane'],
+            ])
+        })
+
+        it('keeps the raw tags in code mode', () => {
+            const fixture = rowsFor(
+                { key: 'shop', value: 'bakery' },
+                {
+                    'payment:cash': 'yes',
+                    'payment:visa': 'no',
+                    cuisine: 'pizza;italian',
+                }
+            )
+
+            fixture.componentInstance.toggleCode()
+
+            expect(
+                fixture.componentInstance
+                    .rows()
+                    .map((row) => [row.label, row.value])
+            ).toEqual([
+                ['shop', 'bakery'],
+                ['payment:cash', 'yes'],
+                ['payment:visa', 'no'],
+                ['cuisine', 'pizza;italian'],
+            ])
+        })
     })
 })

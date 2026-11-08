@@ -14,6 +14,7 @@
 
     <app-map-controls
         [newVersion]="newVersion()"
+        [mapUnavailable]="mapService.mapInitializationError() !== null"
         [attr.inert]="
             sheetLevel() === 'expanded' &&
             !mapService.markerMoving() &&
@@ -33,7 +34,15 @@
         (addRequested)="startAddingObject()"
     ></app-map-controls>
 
-    @if (displayedSelection(); as selection) {
+    @if (mapService.mapInitializationError(); as mapError) {
+    <section class="map-error-banner" role="alert">
+        <h2>{{ 'MAIN.MAP_INITIALIZATION.TITLE' | translate }}</h2>
+        <p>{{ mapError.messageKey | translate }}</p>
+        <button type="button" (click)="retryMapInitialization()">
+            {{ 'MAIN.MAP_INITIALIZATION.RETRY' | translate }}
+        </button>
+    </section>
+    } @if (displayedSelection(); as selection) {
     <app-object-sheet
         #objectSheet
         [selection]="selection"
@@ -74,20 +83,6 @@
             {{ 'MAIN.STARTUP.RESET_LOCAL_DATA' | translate }}
         </button>
         }
-    </div>
-</section>
-} @if (mapService.mapInitializationError(); as mapError) {
-<section class="startup-state startup-state--error" role="alert">
-    <h1>{{ 'MAIN.MAP_INITIALIZATION.TITLE' | translate }}</h1>
-    <p>{{ mapError.messageKey | translate }}</p>
-    <div class="startup-state__actions">
-        <button
-            type="button"
-            class="secondary-button"
-            (click)="retryMapInitialization()"
-        >
-            {{ 'MAIN.MAP_INITIALIZATION.RETRY' | translate }}
-        </button>
     </div>
 </section>
 }

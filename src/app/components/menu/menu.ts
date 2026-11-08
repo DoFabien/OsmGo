@@ -81,16 +81,15 @@ export class MenuPage {
         }
     }
 
-    pushPage(path: string): void {
+    pushPage(path: string, queryParams?: Record<string, number>): void {
         this.closeMenu()
-        void this.overlayNavigation.open(path)
+        void this.overlayNavigation.open(path, queryParams)
     }
 
     openBaseMapsPage() {
-        const centerOfMap = this.mapService.map.getCenter()
-        const lng = centerOfMap.lng
-        const lat = centerOfMap.lat
-        this.pushPage(`/basemaps/${lng}/${lat}`)
+        const { lng, lat } =
+            this.mapService.currentCenter() ?? this.configService.lastView()
+        this.pushPage('/basemaps', { lng, lat })
     }
 
     closeMenu() {
@@ -104,7 +103,14 @@ export class MenuPage {
 
     login(): void {
         this.osmAuthService.login().subscribe({
-            error: (error) => console.error('Unable to start login.', error),
+            error: (error) => {
+                console.error('Unable to start login.', error)
+                this.snackBar.open(
+                    this.translate.instant('MENU.LOGIN_ERROR'),
+                    this.translate.instant('SHARED.CLOSE'),
+                    { duration: 6000 }
+                )
+            },
         })
     }
 

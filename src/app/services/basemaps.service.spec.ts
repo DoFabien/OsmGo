@@ -31,4 +31,42 @@ describe('BasemapsService', () => {
         expect(http.get).toHaveBeenCalledOnce()
         expect(http.get).toHaveBeenCalledWith('assets/imagery.json')
     })
+
+    it('leaves out imagery whose tile URL cannot be filled in', async () => {
+        const usable: Feature<Polygon, Basemap> = {
+            type: 'Feature',
+            properties: {
+                id: 'usable',
+                name: 'Usable',
+                tiles: ['https://tiles.example/{z}/{x}/{y}'],
+            },
+            geometry: null as unknown as Polygon,
+        }
+        const arcgis: Feature<Polygon, Basemap> = {
+            type: 'Feature',
+            properties: {
+                id: 'arcgis',
+                name: 'ArcGIS export',
+                tiles: [
+                    'https://maps.example/export?bbox={bbox-epsg-3857}&imageSR={wkid}',
+                ],
+            },
+            geometry: null as unknown as Polygon,
+        }
+        TestBed.configureTestingModule({
+            providers: [
+                BasemapsService,
+                {
+                    provide: HttpClient,
+                    useValue: { get: () => of([arcgis, usable]) },
+                },
+            ],
+        })
+
+        const basemaps = await firstValueFrom(
+            TestBed.inject(BasemapsService).getBasemaps$(2, 48)
+        )
+
+        expect(basemaps.map((basemap) => basemap.id)).toEqual(['usable'])
+    })
 })

@@ -47,6 +47,8 @@
         type="button"
         class="sheet-handle"
         [attr.aria-label]="'MAIN.SELECTION.RESIZE_PANEL' | translate"
+        [attr.aria-expanded]="level() === 'expanded'"
+        (click)="onHandleClick($event)"
         (pointerdown)="onPointerDown($event)"
         (pointermove)="onPointerMove($event)"
         (pointerup)="onPointerUp($event)"
@@ -77,7 +79,11 @@
             class="stack-count"
             data-testid="stack-count"
             [matTooltip]="'MAIN.SELECTION.STACK.LIST' | translate"
-            [attr.aria-label]="'MAIN.SELECTION.STACK.LIST' | translate"
+            [attr.aria-label]="
+                'MAIN.SELECTION.STACK.POSITION'
+                    | translate
+                        : { index: stack.index + 1, count: stack.count }
+            "
             (click)="stackListRequested.emit()"
         >
             {{ stack.index + 1 }} / {{ stack.count }}
@@ -213,12 +219,12 @@
                 mat-button
                 type="button"
                 [disabled]="mapService.isProcessing()"
-                (click)="cancelChange()"
+                (click)="confirmCancelChange()"
             >
                 <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
                     >undo</mat-icon
                 >
-                {{ 'SHARED.CLEAR' | translate }}
+                {{ 'MAIN.SELECTION.REVERT_LOCAL' | translate }}
             </button>
         </section>
         } @if (shouldShowSurveyCard()) {

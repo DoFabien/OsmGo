@@ -22,4 +22,40 @@ describe('DialogMultiFeaturesComponent', () => {
     it('should create', () => {
         expect(component).toBeTruthy()
     })
+
+    it('lists a node and a way that share the same numeric id', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const feature = (type: string, name: string) => ({
+            properties: {
+                _name: name,
+                hexColor: '#000',
+                icon: '',
+                id: 42,
+                type,
+            },
+        })
+        fixture.componentRef.setInput('features', [
+            feature('node', 'A node'),
+            feature('way', 'A way'),
+        ])
+        fixture.detectChanges()
+        fixture.componentRef.setInput('features', [
+            feature('node', 'A node'),
+            feature('way', 'A way'),
+            feature('relation', 'A relation'),
+        ])
+        fixture.detectChanges()
+
+        const rows: HTMLElement[] = Array.from(
+            fixture.nativeElement.querySelectorAll('.feature-row')
+        )
+
+        expect(rows.map((row) => row.textContent)).toEqual([
+            expect.stringContaining('A node'),
+            expect.stringContaining('A way'),
+            expect.stringContaining('A relation'),
+        ])
+        expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('NG0955'))
+        warn.mockRestore()
+    })
 })

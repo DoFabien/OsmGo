@@ -1,9 +1,18 @@
 import { HttpClient } from '@angular/common/http'
-import { DOCUMENT, inject, NgZone, Service, signal } from '@angular/core'
+import {
+    computed,
+    DOCUMENT,
+    inject,
+    NgZone,
+    Service,
+    signal,
+} from '@angular/core'
 import { ActivatedRoute, type Params, Router } from '@angular/router'
 import { resolveAppUrl } from '@app/utils/asset-url'
+import { isDeepEqual } from '@app/utils/deep-equal'
 import { Haptics, ImpactStyle } from '@capacitor/haptics'
 import { TranslateService } from '@ngx-translate/core'
+import { DEFAULT_RASTER_MAX_ZOOM } from '@osmgo/shared/basemap.constants'
 import {
     type CompassHeading,
     type EventShowModal,
@@ -17,7 +26,8 @@ import {
 } from '@osmgo/type'
 import { setIconStyle } from '@scripts/osmToOsmgo/index.js'
 import { AlertService } from '@services/alert.service'
-import type { Basemap } from '@services/basemaps.service'
+import { AppStorage } from '@services/app-storage.service'
+import { type Basemap, hasSupportedTileUrls } from '@services/basemaps.service'
 import { type Config, ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { LocationService } from '@services/location.service'
@@ -39,13 +49,18 @@ import type {
     Point,
 } from 'geojson'
 import {
+    type AddLayerObject,
     AttributionControl,
     type FilterSpecification,
+    type GeoJSONFeatureId,
     type GeoJSONSource,
+    type GeoJSONSourceDiff,
+    type JumpToOptions,
     type LngLat,
     type LngLatLike,
     type MapGeoJSONFeature,
     type ErrorEvent as MapLibreErrorEvent,
+    type MapLibreEvent,
     Map as MapLibreMap,
     type MapMouseEvent,
     type MapOptions,
@@ -54,9 +69,24 @@ import {
     type RasterSourceSpecification,
     ScaleControl,
     type StyleSpecification,
+    type VectorTileSource,
 } from 'maplibre-gl'
-import { type Observable, Subject } from 'rxjs'
-import { debounceTime, filter, map, throttleTime } from 'rxjs/operators'
+import {
+    asyncScheduler,
+    defer,
+    firstValueFrom,
+    forkJoin,
+    type Observable,
+    Subject,
+} from 'rxjs'
+import {
+    debounceTime,
+    filter,
+    finalize,
+    map,
+    throttleTime,
+    timeout,
+} from 'rxjs/operators'
 import type { ModalDismissData } from '../components/modal/modal'
 
 export const getMarkerLayout = () => ({
@@ -90,6 +120,166 @@ export const deduplicateSelectableFeatures = (
     return [...featuresById.values()]
 }
 
+const GPS_START_ZOOM = 19
+const HEADING_MIN_DELTA = 3
+const TAP_QUERY_RADIUS = 10
+const FOLLOW_VIEW_SAVE_INTERVAL_MS = 15_000
+const FOLLOW_EVENT_DATA = { osmgoFollow: true }
+const HEADING_RENDER_INTERVAL_MS = 250
+const FOCUS_MAX_ZOOM = 19
+/** Below this zoom, a download would cover too large an area. */
+export const MIN_DOWNLOAD_ZOOM = 14
+
+const BASEMAP_SOURCE_ID = 'openmaptiles'
+const BASEMAP_TILEJSON_STORAGE_KEY = 'basemapTileJson'
+const BASEMAP_TILEJSON_ASSET = 'assets/mapStyle/openfreemap-planet.json'
+const BASEMAP_TILEJSON_TIMEOUT_MS = 5_000
+
+/** What MapLibre needs from a TileJSON to draw the vector background. */
+export interface BasemapTileJson {
+    tiles: string[]
+    minzoom?: number
+    maxzoom?: number
+    bounds?: [number, number, number, number]
+    attribution?: string
+}
+
+const isTileZoom = (value: unknown): value is number =>
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 24
+
+export const readBasemapTileJson = (
+    value: unknown
+): BasemapTileJson | undefined => {
+    if (typeof value !== 'object' || value === null) return undefined
+    const { tiles, minzoom, maxzoom, bounds, attribution } = value as Record<
+        string,
+        unknown
+    >
+    if (
+        !Array.isArray(tiles) ||
+        tiles.length === 0 ||
+        !tiles.every(
+            (tile) => typeof tile === 'string' && tile.startsWith('https://')
+        )
+    ) {
+        return undefined
+    }
+    const tileJson: BasemapTileJson = { tiles: [...tiles] }
+    if (isTileZoom(minzoom)) tileJson.minzoom = minzoom
+    if (isTileZoom(maxzoom)) tileJson.maxzoom = maxzoom
+    if (
+        Array.isArray(bounds) &&
+        bounds.length === 4 &&
+        bounds.every(
+            (coordinate) =>
+                typeof coordinate === 'number' && Number.isFinite(coordinate)
+        )
+    ) {
+        tileJson.bounds = [bounds[0], bounds[1], bounds[2], bounds[3]]
+    }
+    if (typeof attribution === 'string') tileJson.attribution = attribution
+    return tileJson
+}
+
+export type MapFocusTarget =
+    | { center: [number, number]; zoom?: number }
+    | { bounds: [[number, number], [number, number]]; padding?: number }
+
+/** Feature properties read by the map style, the filters and the tap handlers. */
+const MAP_FEATURE_PROPERTY_KEYS = [
+    'id',
+    'type',
+    '_name',
+    'icon',
+    'marker',
+    'hexColor',
+    'configId',
+    'changeType',
+    'deprecated',
+    'fixme',
+    'mesure',
+    'time',
+] as const
+
+const toMapFeatureProperties = (
+    properties: OsmGoFeature['properties']
+): Record<string, unknown> => {
+    const mapProperties: Record<string, unknown> = {}
+    for (const key of MAP_FEATURE_PROPERTY_KEYS) {
+        const value = properties[key]
+        if (value !== undefined) mapProperties[key] = value
+    }
+    return mapProperties
+}
+
+/** Above this many changes, or half the drawn features, a full redraw is cheaper. */
+const INCREMENTAL_RENDER_MAX_CHANGES = 200
+
+type RenderedFeatures = globalThis.Map<GeoJSONFeatureId, Feature>
+
+/**
+ * What each GeoJSON source holds since its last write, by feature id. A source
+ * rebuilt by a style reload or a WebGL context restoration starts unknown.
+ */
+const renderedFeaturesBySource = new WeakMap<object, RenderedFeatures>()
+
+const toMapFeature = (
+    properties: OsmGoFeature['properties'],
+    geometry: Feature['geometry']
+): Feature => ({
+    type: 'Feature',
+    id: `${properties.type}/${properties.id}`,
+    geometry,
+    properties: toMapFeatureProperties(properties),
+})
+
+const diffRenderedFeatures = (
+    previous: RenderedFeatures,
+    next: RenderedFeatures
+): GeoJSONSourceDiff => {
+    const remove = [...previous.keys()].filter((id) => !next.has(id))
+    const add = [...next].flatMap(([id, feature]) => {
+        const drawn = previous.get(id)
+        return drawn &&
+            isDeepEqual(drawn.geometry, feature.geometry) &&
+            isDeepEqual(drawn.properties, feature.properties)
+            ? []
+            : [feature]
+    })
+    return { remove, add }
+}
+
+const spriteRatio = (): 1 | 2 => (window.devicePixelRatio > 1 ? 2 : 1)
+
+const spriteSheetPath = (ratio: number): string =>
+    ratio === 1
+        ? 'assets/mapStyle/sprites/sprites.png'
+        : 'assets/mapStyle/sprites/sprites@2x.png'
+
+const isResourceLoadError = (event: MapLibreErrorEvent): boolean => {
+    const detail = event as MapLibreErrorEvent & {
+        sourceId?: string
+        tile?: unknown
+    }
+    return detail.sourceId !== undefined || detail.tile !== undefined
+}
+
+const isGpuInitializationError = (event: MapLibreErrorEvent): boolean =>
+    (event.error as Error | undefined)?.name === 'GPUInitializationError'
+
+const isFollowCameraEvent = (event: object): boolean => 'osmgoFollow' in event
+
+const headingDelta = (first: number, second: number): number =>
+    Math.abs(((((first - second) % 360) + 540) % 360) - 180)
+
+type MarkerRedraw = { geojson: OsmGoFeatureCollection; replace: boolean }
+export interface MarkerRedrawOptions {
+    /** Sends the whole collection, as after a download. */
+    replace?: boolean
+}
 type HeadingWithTrueHeading = CompassHeading & { trueHeading: number }
 type LoadedMapImage = Awaited<ReturnType<MapLibreMap['loadImage']>>['data']
 type IconParameters = { shape: string; color: string; id: string }
@@ -115,12 +305,23 @@ export class MapService {
     private readonly router = inject(Router)
     private readonly activatedRoute = inject(ActivatedRoute)
     private readonly document = inject(DOCUMENT)
+    private readonly storage = inject(AppStorage)
 
     isFirstPosition: boolean = true
     private readonly loadingDataState = signal(false)
     readonly loadingData = this.loadingDataState.asReadonly()
+    private processingCount = 0
     private readonly processingState = signal(false)
+    /** An object is being saved or the changes are being uploaded. */
     readonly isProcessing = this.processingState.asReadonly()
+    private readonly downloadingState = signal(false)
+    readonly isDownloading = this.downloadingState.asReadonly()
+    readonly isBusy = computed(
+        () => this.processingState() || this.downloadingState()
+    )
+    private basemapTileJsonUrl?: string
+    private basemapTiles?: string[]
+    private basemapTileJsonRefreshing = false
     private readonly mapInitializationErrorState =
         signal<MapInitializationError | null>(null)
     readonly mapInitializationError =
@@ -131,60 +332,63 @@ export class MapService {
     private readonly layerController = new MapLayerController()
     private officialRenderRevision = 0
     private pendingRenderRevision = 0
+    private mapLoadAnnounced = false
+    private webglContextLost = false
+    private deferredBasemap?: { baseMap: Basemap; isDisplay: boolean }
     private activeRenderCount = 0
     private lastMapConfig?: Config
 
-    spritesCache: HTMLImageElement | undefined
+    spritesCache: Partial<Record<number, HTMLImageElement>> = {}
     constructor() {
         // Preload sprites
-        const pathSprites =
-            window.devicePixelRatio === 1
-                ? this.assetUrl('assets/mapStyle/sprites/sprites.png')
-                : this.assetUrl('assets/mapStyle/sprites/sprites@2x.png')
+        const ratio = spriteRatio()
         const spriteImage = new Image()
         spriteImage.onload = () => {
-            this.spritesCache = spriteImage
+            this.spritesCache[ratio] = spriteImage
         }
         spriteImage.onerror = (error) => {
             console.error(error)
         }
-        spriteImage.src = pathSprites
+        spriteImage.src = this.assetUrl(spriteSheetPath(ratio))
 
-        this.locationService.locationReady$.subscribe(() => {
-            if (
-                this.mapCreated &&
-                this.configService.config().centerWhenGpsIsReady
-            ) {
-                this.map.setZoom(19)
-            }
+        this.markerRedraw$.subscribe(({ geojson, replace }) => {
+            void this.renderMarkerCollection(geojson, 'official', replace)
         })
 
-        this.markerRedraw$.subscribe((geojson) => {
-            void this.renderMarkerCollection(geojson, 'official')
+        this.changedMarkerRedraw$.subscribe(({ geojson, replace }) => {
+            void this.renderMarkerCollection(geojson, 'pending', replace)
         })
-
-        this.changedMarkerRedraw$.subscribe(
-            (geojson: OsmGoFeatureCollection) => {
-                void this.renderMarkerCollection(geojson, 'pending')
-            }
-        )
 
         this.mapMove$.pipe(debounceTime(700)).subscribe(() => {
-            if (!this.mapCreated) return
-            const mapCenter = this.map.getCenter()
-            const mapBearing = this.map.getBearing()
-            const mapZoom = this.map.getZoom()
-            const currentView = {
-                lng: mapCenter.lng,
-                lat: mapCenter.lat,
-                zoom: mapZoom,
-                bearing: mapBearing,
-            }
-            this.configService.setLastView(currentView)
+            this.saveLastView()
         })
 
+        this.followMoveSubject
+            .pipe(
+                throttleTime(FOLLOW_VIEW_SAVE_INTERVAL_MS, asyncScheduler, {
+                    leading: false,
+                    trailing: true,
+                })
+            )
+            .subscribe(() => {
+                this.saveLastView()
+            })
+
         this.mapMoveEndSubject.pipe(debounceTime(150)).subscribe(() => {
-            if (this.mapCreated) this.setCenterInUrl()
+            if (this.mapCreated && !this.configService.freezeMapRenderer) {
+                this.setCenterInUrl()
+            }
+        })
+    }
+
+    private saveLastView(): void {
+        if (!this.mapCreated || this.configService.freezeMapRenderer) return
+        const mapCenter = this.map.getCenter()
+        this.configService.setLastView({
+            lng: mapCenter.lng,
+            lat: mapCenter.lat,
+            zoom: this.map.getZoom(),
+            bearing: this.map.getBearing(),
         })
     }
 
@@ -210,12 +414,11 @@ export class MapService {
     readonly moveElement$ = this.moveElementSubject.asObservable()
     private readonly showModalSubject = new Subject<EventShowModal>()
     readonly showModal$ = this.showModalSubject.asObservable()
-    private readonly markerRedrawSubject = new Subject<OsmGoFeatureCollection>()
+    private readonly markerRedrawSubject = new Subject<MarkerRedraw>()
     readonly markerRedraw$ = this.markerRedrawSubject.asObservable()
     private readonly mapLoadedSubject = new Subject<void>()
     readonly mapLoaded$ = this.mapLoadedSubject.asObservable()
-    private readonly changedMarkerRedrawSubject =
-        new Subject<OsmGoFeatureCollection>()
+    private readonly changedMarkerRedrawSubject = new Subject<MarkerRedraw>()
     readonly changedMarkerRedraw$ =
         this.changedMarkerRedrawSubject.asObservable()
     private readonly featureChoiceSubject = new Subject<MapGeoJSONFeature[]>()
@@ -229,14 +432,24 @@ export class MapService {
     private readonly mapMoveSubject = new Subject<void>()
     readonly mapMove$ = this.mapMoveSubject.asObservable()
     private readonly mapMoveEndSubject = new Subject<void>()
+    private readonly followMoveSubject = new Subject<void>()
+    private pendingRecenter = false
     private pendingMapUrlSignature?: string
     private readonly markerMovingState = signal(false)
     readonly markerMoving = this.markerMovingState.asReadonly()
     markerPositionate?: OsmGoMarker<string>
     markerMaplibreUnknown: Record<string, LoadedMapImage> = {}
 
+    /** Calls are paired, so that overlapping operations do not end each other. */
     setIsProcessing(isProcessing: boolean): void {
-        this.processingState.set(isProcessing)
+        this.processingCount = isProcessing
+            ? this.processingCount + 1
+            : Math.max(0, this.processingCount - 1)
+        this.processingState.set(this.processingCount > 0)
+    }
+
+    setIsDownloading(isDownloading: boolean): void {
+        this.downloadingState.set(isDownloading)
     }
 
     redrawBbox(geojson: OsmGoFeatureCollection): void {
@@ -251,17 +464,31 @@ export class MapService {
         this.showModalSubject.next(data)
     }
 
-    redrawMarkers(geojson: OsmGoFeatureCollection): void {
-        this.markerRedrawSubject.next(geojson)
+    /** Redraws the official objects; only the changed ones unless `replace` is set. */
+    redrawMarkers(
+        geojson: OsmGoFeatureCollection,
+        options: MarkerRedrawOptions = {}
+    ): void {
+        this.markerRedrawSubject.next({
+            geojson,
+            replace: options.replace ?? false,
+        })
     }
 
-    redrawChangedMarkers(geojson: OsmGoFeatureCollection): void {
-        this.changedMarkerRedrawSubject.next(geojson)
+    redrawChangedMarkers(
+        geojson: OsmGoFeatureCollection,
+        options: MarkerRedrawOptions = {}
+    ): void {
+        this.changedMarkerRedrawSubject.next({
+            geojson,
+            replace: options.replace ?? false,
+        })
     }
 
     private async renderMarkerCollection(
         geojson: OsmGoFeatureCollection,
-        target: 'official' | 'pending'
+        target: 'official' | 'pending',
+        replace = false
     ): Promise<void> {
         const revision =
             target === 'official'
@@ -312,11 +539,15 @@ export class MapService {
             if (!isCurrent()) return
             const dataSourceId = target === 'official' ? 'data' : 'data_changed'
             const waysSourceId = target === 'official' ? 'ways' : 'ways_changed'
-            const source = activeMap.getSource(dataSourceId) as
-                | GeoJSONSource
-                | undefined
-            source?.setData(renderGeojson)
-            this.drawWaysPoly(renderGeojson, waysSourceId, activeMap)
+            this.writeSourceFeatures(
+                activeMap,
+                dataSourceId,
+                renderGeojson.features.map((feature) =>
+                    toMapFeature(feature.properties, feature.geometry)
+                ),
+                replace
+            )
+            this.drawWaysPoly(renderGeojson, waysSourceId, activeMap, replace)
         } catch (error) {
             if (isCurrent()) console.error(error)
         } finally {
@@ -353,7 +584,8 @@ export class MapService {
     drawWaysPoly(
         geojson: OsmGoFeatureCollection,
         source: string,
-        targetMap = this.map
+        targetMap = this.map,
+        replace = false
     ): void {
         const featuresWay: Feature[] = []
         for (const feature of geojson.features) {
@@ -361,21 +593,62 @@ export class MapService {
                 feature.properties.type !== 'node' &&
                 feature.properties.way_geometry
             ) {
-                featuresWay.push({
-                    type: 'Feature',
-                    properties: feature.properties,
-                    geometry: feature.properties.way_geometry,
-                })
+                featuresWay.push(
+                    toMapFeature(
+                        feature.properties,
+                        feature.properties.way_geometry
+                    )
+                )
             }
         }
+        this.writeSourceFeatures(targetMap, source, featuresWay, replace)
+    }
 
-        const mapSource = targetMap.getSource(source) as
+    /**
+     * Sends only the features that changed since the last write to this source,
+     * or the whole collection when the diff is large or the source is unknown.
+     */
+    private writeSourceFeatures(
+        targetMap: MapLibreMap,
+        sourceId: string,
+        features: Feature[],
+        replace: boolean
+    ): void {
+        const source = targetMap.getSource(sourceId) as
             | GeoJSONSource
             | undefined
-        mapSource?.setData({
-            type: 'FeatureCollection',
-            features: featuresWay,
-        })
+        if (!source) return
+        const next: RenderedFeatures = new globalThis.Map()
+        for (const feature of features) {
+            if (feature.id !== undefined) next.set(feature.id, feature)
+        }
+        const updateable = next.size === features.length
+        const previous = renderedFeaturesBySource.get(source)
+        if (!replace && updateable && previous) {
+            const diff = diffRenderedFeatures(previous, next)
+            const changes = (diff.remove?.length ?? 0) + (diff.add?.length ?? 0)
+            if (
+                changes <= INCREMENTAL_RENDER_MAX_CHANGES &&
+                changes * 2 <= previous.size
+            ) {
+                if (changes > 0) {
+                    source.updateData(diff).catch((error: unknown) => {
+                        console.error(error)
+                        const latest = renderedFeaturesBySource.get(source)
+                        if (!latest) return
+                        void source.setData({
+                            type: 'FeatureCollection',
+                            features: [...latest.values()],
+                        })
+                    })
+                }
+                renderedFeaturesBySource.set(source, next)
+                return
+            }
+        }
+        void source.setData({ type: 'FeatureCollection', features })
+        if (updateable) renderedFeaturesBySource.set(source, next)
+        else renderedFeaturesBySource.delete(source)
     }
 
     /** Converts a distance in meters to pixels at the current map scale. */
@@ -405,6 +678,13 @@ export class MapService {
         const pxPerMeter = mapWidth / distWidth
 
         return Math.round(dist * pxPerMeter)
+    }
+
+    /** Undefined while the map is not running, as on its error screen. */
+    currentCenter(): { lng: number; lat: number } | undefined {
+        if (!this.mapCreated) return undefined
+        const { lng, lat } = this.map.getCenter()
+        return { lng, lat }
     }
 
     getBbox(): BBox {
@@ -447,12 +727,25 @@ export class MapService {
     }
 
     displaySatelliteBaseMap(baseMap: Basemap, isDisplay: boolean): void {
+        if (!this.mapCreated || !this.layersAreLoaded) {
+            this.deferredBasemap = { baseMap, isDisplay }
+            return
+        }
+        if (isDisplay && !hasSupportedTileUrls(baseMap)) {
+            console.warn(`Unsupported tile URL for ${baseMap.id}.`)
+            if (this.map.getLayer('basemap')) {
+                this.map.setLayoutProperty('basemap', 'visibility', 'none')
+            }
+            this.updateBasemapAttribution('')
+            this.isDisplaySatelliteBaseMapState.set(false)
+            return
+        }
         const bmSource: RasterSourceSpecification = {
             type: 'raster',
             tiles: baseMap.tiles,
             scheme: baseMap.scheme ?? 'xyz',
             tileSize: 256,
-            maxzoom: baseMap.max_zoom,
+            maxzoom: baseMap.max_zoom ?? DEFAULT_RASTER_MAX_ZOOM,
         }
         this.upsertBasemap(bmSource, isDisplay)
         this.updateBasemapAttribution(
@@ -520,17 +813,30 @@ export class MapService {
         this.basemapAttributionText = attribution
     }
     centerOnMyPosition(): void {
+        if (!this.mapCreated) return
+        if (!this.locationService.location()) {
+            this.pendingRecenter = true
+            return
+        }
+        this.pendingRecenter = false
+        this.isFirstPosition = false
         const currentZoom = this.map.getZoom()
-        if (this.configService.config().lockMapHeading) {
+        const config = this.configService.config()
+        if (config.lockMapHeading) {
             this.headingIsLocked = true
         }
         let bearing = 0
-        if (this.configService.config().followPosition) {
+        if (config.followPosition) {
             this.positionIsFollow = true
-            if (this.configService.config().lockMapHeading) {
+            if (config.lockMapHeading) {
                 bearing = this.locationService.compassHeading().trueHeading ?? 0
-
-                this.map.setLayoutProperty('location_user', 'icon-rotate', 0)
+                if (this.layersAreLoaded) {
+                    this.map.setLayoutProperty(
+                        'location_user',
+                        'icon-rotate',
+                        0
+                    )
+                }
             }
         }
         let newZoom = currentZoom
@@ -545,6 +851,7 @@ export class MapService {
         })
     }
     changeLocationRadius(newRadius: number, transition = false): void {
+        if (!this.mapCreated || !this.layersAreLoaded) return
         const pxRadius = this.getPixelDistFromMeter(this.map, newRadius)
         const duration = transition ? 300 : 0
         this.map.setPaintProperty(
@@ -556,6 +863,7 @@ export class MapService {
     }
     positionateMarker(): void {
         this.endMarkerMovement()
+        this.stopFollowing()
         this.markerPositionate = this.createDomMoveMarker(
             [this.map.getCenter().lng, this.map.getCenter().lat],
             ''
@@ -636,7 +944,29 @@ export class MapService {
         this.markerMove = undefined
     }
 
+    private stopFollowing(): void {
+        this.positionIsFollow = false
+        this.headingIsLocked = false
+        this.pendingRecenter = false
+    }
+
+    /** Shows a place chosen by the app or the user; the GPS no longer moves the map. */
+    focusOn(target: MapFocusTarget): void {
+        if (!this.mapCreated) return
+        this.stopFollowing()
+        if ('bounds' in target) {
+            this.map.fitBounds(target.bounds, {
+                padding: target.padding ?? 0,
+                maxZoom: FOCUS_MAX_ZOOM,
+                animate: false,
+            })
+            return
+        }
+        this.map.jumpTo({ center: target.center, zoom: target.zoom })
+    }
+
     private endMarkerMovement(): void {
+        this.pendingRecenter = false
         this.markerMovingState.set(false)
         this.markerMoveMovingState.set(false)
         this.markerPositionate?.remove()
@@ -658,23 +988,131 @@ export class MapService {
     async resetDataMap(): Promise<void> {
         const emptyData = await this.dataService.resetDownloadedData()
         this.redrawBbox(emptyData.geojsonBbox)
-        this.redrawMarkers(emptyData.geojson)
+        this.redrawMarkers(emptyData.geojson, { replace: true })
     }
 
     getMapStyle(): Observable<StyleSpecification> {
-        return this.http
-            .get<StyleSpecification>(
+        return forkJoin({
+            maplibreStyle: this.http.get<StyleSpecification>(
                 this.assetUrl('assets/mapStyle/brigthCustom.json')
-            )
-            .pipe(
-                map((maplibreStyle) => {
-                    const spritesFullPath = this.assetUrl(
-                        'assets/mapStyle/sprites/sprites'
-                    )
+            ),
+            tileJson: defer(() => this.loadBasemapTileJson()),
+        }).pipe(
+            map(({ maplibreStyle, tileJson }) => {
+                const spritesFullPath = this.assetUrl(
+                    'assets/mapStyle/sprites/sprites'
+                )
 
-                    return { ...maplibreStyle, sprite: spritesFullPath }
+                return {
+                    ...this.withInlineTileJson(maplibreStyle, tileJson),
+                    sprite: spritesFullPath,
+                }
+            })
+        )
+    }
+
+    /** The last TileJSON received, else the copy shipped with the app. */
+    private async loadBasemapTileJson(): Promise<BasemapTileJson | undefined> {
+        try {
+            const stored = readBasemapTileJson(
+                await this.storage.get(BASEMAP_TILEJSON_STORAGE_KEY)
+            )
+            if (stored) return stored
+        } catch (error) {
+            console.warn('The saved basemap TileJSON is unreadable.', error)
+        }
+        try {
+            return readBasemapTileJson(
+                await firstValueFrom(
+                    this.http.get<unknown>(
+                        this.assetUrl(BASEMAP_TILEJSON_ASSET)
+                    )
+                )
+            )
+        } catch (error) {
+            console.warn('The bundled basemap TileJSON is unavailable.', error)
+            return undefined
+        }
+    }
+
+    /**
+     * Puts the TileJSON in the style instead of its URL: when MapLibre cannot
+     * fetch it, it ignores the vector background for the whole session.
+     */
+    private withInlineTileJson(
+        style: StyleSpecification,
+        tileJson: BasemapTileJson | undefined
+    ): StyleSpecification {
+        const source = style.sources?.[BASEMAP_SOURCE_ID]
+        if (source?.type !== 'vector' || !source.url) return style
+        this.basemapTileJsonUrl = source.url
+        this.basemapTiles = undefined
+        if (!tileJson) return style
+        const { url: _url, ...inlineSource } = source
+        this.basemapTiles = tileJson.tiles
+        return {
+            ...style,
+            sources: {
+                ...style.sources,
+                [BASEMAP_SOURCE_ID]: { ...inlineSource, ...tileJson },
+            },
+        }
+    }
+
+    /**
+     * Fetches the current TileJSON without holding the map back, keeps it for
+     * the next offline start and moves the background to a new tile version.
+     */
+    refreshBasemapTileJson(options: { reloadTiles?: boolean } = {}): void {
+        const url = this.basemapTileJsonUrl
+        if (!url || this.basemapTileJsonRefreshing) return
+        this.basemapTileJsonRefreshing = true
+        defer(() => this.http.get<unknown>(url))
+            .pipe(
+                timeout(BASEMAP_TILEJSON_TIMEOUT_MS),
+                finalize(() => {
+                    this.basemapTileJsonRefreshing = false
                 })
             )
+            .subscribe({
+                next: (response) => {
+                    const tileJson = readBasemapTileJson(response)
+                    if (!tileJson) return
+                    this.storage
+                        .set(BASEMAP_TILEJSON_STORAGE_KEY, tileJson)
+                        .catch((error: unknown) => {
+                            console.warn(
+                                'The basemap TileJSON could not be saved.',
+                                error
+                            )
+                        })
+                    this.applyBasemapTiles(
+                        tileJson.tiles,
+                        options.reloadTiles ?? false
+                    )
+                },
+                error: (error: unknown) => {
+                    console.warn(
+                        'The basemap TileJSON could not be refreshed.',
+                        error
+                    )
+                },
+            })
+    }
+
+    /** `reload` also fetches again the tiles that failed while offline. */
+    private applyBasemapTiles(tiles: string[], reload: boolean): void {
+        if (!this.mapCreated || !this.layersAreLoaded) return
+        const unchanged =
+            this.basemapTiles !== undefined &&
+            isDeepEqual(this.basemapTiles, tiles)
+        if (unchanged && !reload) return
+        const source = this.map.getSource(BASEMAP_SOURCE_ID) as
+            | VectorTileSource
+            | undefined
+        if (!source) return
+        source.setTiles(tiles)
+        this.basemapTiles = tiles
     }
 
     getIconStyle(feature: OsmGoFeature): OsmGoFeature {
@@ -692,7 +1130,9 @@ export class MapService {
             next: (mapStyle) => {
                 if (this.mapCreated) return
                 const canvas = this.document.createElement('canvas')
-                if (!canvas.getContext('webgl2')) {
+                const probe = canvas.getContext('webgl2')
+                probe?.getExtension('WEBGL_lose_context')?.loseContext()
+                if (!probe) {
                     this.failMapInitialization(
                         'MAIN.MAP_INITIALIZATION.WEBGL_REQUIRED'
                     )
@@ -711,10 +1151,12 @@ export class MapService {
                             zoom: config.lastView.zoom,
                             bearing: config.lastView.bearing,
                             pitch: 0,
+                            maxPitch: 0,
                             maxZoom: 22,
                             doubleClickZoom: false,
                             attributionControl: false,
                             dragRotate: true,
+                            touchPitch: false,
                             trackResize: false,
                             pitchWithRotate: false,
                             collectResourceTiming: false,
@@ -735,7 +1177,7 @@ export class MapService {
                             new ScaleControl({ maxWidth: 160, unit: 'metric' })
                         )
 
-                        const onLoad = (): void => {
+                        const onStyleLoad = (): void => {
                             if (!this.mapCreated || this.map !== activeMap)
                                 return
                             this.styleReady = true
@@ -745,20 +1187,28 @@ export class MapService {
                             if (
                                 !this.mapCreated ||
                                 this.map !== activeMap ||
-                                this.styleReady
+                                isResourceLoadError(event)
                             ) {
                                 return
                             }
+                            const restorationFailed =
+                                this.webglContextLost &&
+                                isGpuInitializationError(event)
+                            if (this.styleReady && !restorationFailed) return
                             this.failMapInitialization(
                                 'MAIN.MAP_INITIALIZATION.CREATION_FAILED',
                                 event.error,
                                 activeMap
                             )
                         }
-                        const onMove = (): void => {
+                        const onMove = (event: MapLibreEvent): void => {
                             if (!this.mapCreated || this.map !== activeMap)
                                 return
-                            this.mapMoveSubject.next()
+                            if (isFollowCameraEvent(event)) {
+                                this.followMoveSubject.next()
+                            } else {
+                                this.mapMoveSubject.next()
+                            }
                             const center = activeMap.getCenter()
                             if (this.markerMoving()) {
                                 this.markerPositionate?.setLngLat(center)
@@ -767,8 +1217,12 @@ export class MapService {
                                 this.markerMove?.setLngLat(center)
                             }
                         }
-                        const onMoveEnd = (): void => {
-                            if (this.mapCreated && this.map === activeMap) {
+                        const onMoveEnd = (event: MapLibreEvent): void => {
+                            if (
+                                this.mapCreated &&
+                                this.map === activeMap &&
+                                !isFollowCameraEvent(event)
+                            ) {
                                 this.mapMoveEndSubject.next()
                             }
                         }
@@ -789,18 +1243,46 @@ export class MapService {
                                 )
                             }
                         }
-                        activeMap.on('load', onLoad)
+                        // MapLibre drops its style with the context and rebuilds it
+                        // from a snapshot once restored, then fires `style.load`.
+                        const onContextLost = (): void => {
+                            if (!this.mapCreated || this.map !== activeMap)
+                                return
+                            this.webglContextLost = true
+                            this.layersAreLoaded = false
+                            this.officialRenderRevision++
+                            this.pendingRenderRevision++
+                        }
+                        const onContextRestored = (): void => {
+                            if (this.map === activeMap) {
+                                this.webglContextLost = false
+                            }
+                        }
+                        activeMap.on('style.load', onStyleLoad)
                         activeMap.on('error', onError)
                         activeMap.on('move', onMove)
                         activeMap.on('moveend', onMoveEnd)
                         activeMap.on('zoom', onZoom)
+                        activeMap.on('webglcontextlost', onContextLost)
+                        activeMap.on('webglcontextrestored', onContextRestored)
                         this.lifecycle.trackCleanup(
-                            () => configuredMap.off('load', onLoad),
+                            () => configuredMap.off('style.load', onStyleLoad),
                             () => configuredMap.off('error', onError),
                             () => configuredMap.off('move', onMove),
                             () => configuredMap.off('moveend', onMoveEnd),
-                            () => configuredMap.off('zoom', onZoom)
+                            () => configuredMap.off('zoom', onZoom),
+                            () =>
+                                configuredMap.off(
+                                    'webglcontextlost',
+                                    onContextLost
+                                ),
+                            () =>
+                                configuredMap.off(
+                                    'webglcontextrestored',
+                                    onContextRestored
+                                )
                         )
+                        this.wireMapInteractions(activeMap)
 
                         this.lifecycle.trackSession(
                             this.bboxChanged$.subscribe((geojsonPolygon) => {
@@ -827,6 +1309,7 @@ export class MapService {
                                     return
                                 }
                                 this.endMarkerMovement()
+                                this.stopFollowing()
                                 this.mode = data.mode
                                 const pointFeature =
                                     data.geojson as OsmGoFeature<Point>
@@ -909,6 +1392,7 @@ export class MapService {
         this.styleReady = false
         this.layersAreLoaded = false
         this.loadingDataState.set(false)
+        this.resetSessionState()
         this.lifecycle.destroy(activeMap)
         if (activeMap && this.map === activeMap) {
             delete (this as { map?: MapLibreMap }).map
@@ -928,11 +1412,27 @@ export class MapService {
         this.pendingRenderRevision++
         this.loadingDataState.set(false)
         this.lifecycle.destroy(activeMap)
+        this.resetSessionState()
+    }
+
+    private resetSessionState(): void {
+        this.mapLoadAnnounced = false
+        this.webglContextLost = false
+        this.deferredBasemap = undefined
         this.lastRenderedHeading = null
         this.isFirstPosition = true
+        this.pendingRecenter = false
+        this.basemapSourceFingerprint = null
+        this.basemapAttributionText = ''
+        this.isDisplaySatelliteBaseMapState.set(false)
     }
 
     setCenterInUrl(): void {
+        if (this.router.currentNavigation()) {
+            // Replacing the URL now would cancel the page being opened.
+            this.mapMoveEndSubject.next()
+            return
+        }
         const center = this.map.getCenter()
         const lng = Math.round(center.lng * 10000000) / 10000000
         const lat = Math.round(center.lat * 10000000) / 10000000
@@ -991,8 +1491,9 @@ export class MapService {
         enable: boolean,
         layerName: string,
         value: number,
-        _map: MapLibreMap
+        _map: MapLibreMap | undefined
     ): FilterSpecification | undefined {
+        if (!_map) return undefined
         return this.layerController.toggleLessThanFilter(
             _map,
             layerName,
@@ -1002,47 +1503,41 @@ export class MapService {
         )
     }
 
-    selectFeature(feature: MapGeoJSONFeature): void {
-        const layer = feature['layer'].id
-        let origineData: FeatureIdSource = 'data'
-        if (
-            [
-                'label_changed',
-                'marker_changed',
-                'icon-change',
-                'way_line_changed',
-                'way_fill_changed',
-            ].includes(layer)
-        ) {
-            origineData = 'data_changed'
-        }
-
+    /** Opens a feature found on the map; false when it is no longer in local data. */
+    selectFeature(feature: MapGeoJSONFeature): boolean {
         const idFromMap = `${feature.properties.type}/${feature.properties.id}`
-        const geojson = this.dataService.getFeatureById(idFromMap, origineData)
+        const pendingGeojson = this.dataService.getFeatureById(
+            idFromMap,
+            'data_changed'
+        )
+        const geojson =
+            pendingGeojson ?? this.dataService.getFeatureById(idFromMap, 'data')
         if (!geojson) {
             console.error(`Feature ${idFromMap} was not found.`)
-            return
+            return false
         }
+        const origineData: FeatureIdSource = pendingGeojson
+            ? 'data_changed'
+            : 'data'
 
-        if (origineData !== 'data_changed') {
-            const queryParams: Params = {
-                id: `${idFromMap}`,
-                zoom: null,
-                center: null,
-            }
-            this.router.navigate([], {
-                replaceUrl: true,
-                relativeTo: this.activatedRoute,
-                queryParams,
-                queryParamsHandling: 'merge',
-            })
+        const queryParams: Params = {
+            id: `${idFromMap}`,
+            zoom: null,
+            center: null,
         }
+        void this.router.navigate([], {
+            replaceUrl: true,
+            relativeTo: this.activatedRoute,
+            queryParams,
+            queryParamsHandling: 'merge',
+        })
 
         this.showModal({
             type: 'Read',
             geojson: geojson,
             origineData: origineData,
         })
+        return true
     }
 
     showOldTagIcon(maxYearAgo: number): void {
@@ -1097,277 +1592,14 @@ export class MapService {
         this.layerController.setVisibility(this.map, 'icon-fixme', 'none')
     }
 
+    /**
+     * Puts the data layers on the current style and redraws them. Runs on every
+     * `style.load`, including the one MapLibre fires after rebuilding its style
+     * for a restored WebGL context, whose sources and layers may already exist.
+     */
     mapIsLoaded(): void {
         if (!this.mapCreated || !this.styleReady || this.layersAreLoaded) return
-        const minzoom = 14
-
-        this.map.addSource('bbox', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-        this.map.addSource('data', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-        this.map.addSource('data_changed', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-        this.map.addSource('ways', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-        this.map.addSource('ways_changed', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-        this.map.addSource('location_circle', {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: [] },
-        })
-
-        this.map.addLayer({
-            id: 'bboxLayer',
-            type: 'line',
-            source: 'bbox',
-            paint: {
-                'line-color': '#ea1212',
-                'line-width': 5,
-                'line-dasharray': [2, 2],
-            },
-        })
-
-        this.map.addLayer({
-            id: 'way_fill',
-            type: 'fill',
-            minzoom: minzoom,
-            source: 'ways',
-            paint: {
-                'fill-color': { property: 'hexColor', type: 'identity' },
-                'fill-opacity': 0.3,
-            },
-            filter: [
-                'all',
-                // Types are not correct for the match filter used in the next line.
-                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
-                // prettier-ignore
-                [
-                    'match',
-                    ['geometry-type'],
-                    ['Polygon', 'MultiPolygon'],
-                    true,
-                    false,
-                ],
-            ],
-        })
-
-        this.map.addLayer({
-            id: 'way_line',
-            type: 'line',
-            source: 'ways',
-            minzoom: minzoom,
-            paint: {
-                'line-color': { property: 'hexColor', type: 'identity' },
-                'line-width': 4,
-                'line-opacity': 0.7,
-            },
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            // Types are not correct for the match filter used in the next line.
-            // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
-            // prettier-ignore
-            filter: [
-                'all',
-                [
-                    'match',
-                    ['geometry-type'],
-                    ['LineString', 'MultiLineString'],
-                    true,
-                    false,
-                ],
-            ],
-        })
-
-        this.map.addLayer({
-            id: 'way_fill_changed',
-            type: 'fill',
-            source: 'ways_changed',
-            paint: {
-                'fill-color': { property: 'hexColor', type: 'identity' },
-                'fill-opacity': 0.3,
-            },
-            filter: [
-                'all',
-                // Types are not correct for the match filter used in the next line.
-                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
-                // prettier-ignore
-                [
-                    'match',
-                    ['geometry-type'],
-                    ['Polygon', 'MultiPolygon'],
-                    true,
-                    false,
-                ],
-            ],
-        })
-
-        this.map.addLayer({
-            id: 'way_line_changed',
-            type: 'line',
-            source: 'ways_changed',
-            paint: {
-                'line-color': { property: 'hexColor', type: 'identity' },
-                'line-width': 4,
-                'line-opacity': 0.7,
-            },
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            filter: [
-                'all',
-                // Types are not correct for the match filter used in the next line.
-                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
-                // prettier-ignore
-                [
-                    'match',
-                    ['geometry-type'],
-                    ['LineString', 'MultiLineString'],
-                    true,
-                    false,
-                ],
-            ],
-        })
-
-        this.map.addLayer({
-            id: 'label',
-            type: 'symbol',
-            minzoom: 16.5,
-            source: 'data',
-            layout: {
-                'icon-image': 'none',
-                'icon-anchor': 'bottom',
-                'text-field': '{_name}',
-                'text-font': ['Roboto-Regular'],
-                'text-allow-overlap': false,
-                'text-size': 11,
-                'text-offset': [0, 1],
-            },
-            paint: {
-                'text-color': '#0a0a0a',
-                'text-halo-color': 'rgba(255,255,255,1)',
-                'text-halo-width': 2,
-            },
-            filter: ['all'],
-        })
-
-        this.map.addLayer({
-            id: 'label_changed',
-            type: 'symbol',
-            minzoom: 16.5,
-            source: 'data_changed',
-            layout: {
-                'icon-image': 'none',
-                'icon-anchor': 'bottom',
-                'text-field': '{_name}',
-                'text-font': ['Roboto-Regular'],
-                'text-allow-overlap': false,
-                'text-size': 11,
-                'text-offset': [0, 1],
-            },
-            paint: {
-                'text-color': '#0a0a0a',
-                'text-halo-color': 'rgba(255,255,255,1)',
-                'text-halo-width': 2,
-            },
-            filter: ['all'],
-        })
-
-        this.map.addLayer({
-            id: 'location_circle',
-            type: 'circle',
-            source: 'location_circle',
-            layout: {},
-            paint: {
-                'circle-color': '#9bbcf2',
-                'circle-opacity': 0.2,
-                'circle-radius': 0,
-                'circle-stroke-width': 1,
-                'circle-stroke-color': '#9bbcf2',
-                'circle-stroke-opacity': 0.5,
-                'circle-pitch-alignment': 'map',
-                'circle-radius-transition': { duration: 0 },
-            },
-        })
-
-        this.map.addLayer({
-            id: 'location_user',
-            type: 'symbol',
-            source: 'location_circle',
-            layout: {
-                'icon-size': 0.5,
-                'icon-image': 'location-without-orientation',
-                'icon-ignore-placement': true,
-                'icon-allow-overlap': true,
-                'icon-pitch-alignment': 'map',
-            },
-        })
-
-        this.map.addLayer({
-            id: 'icon-old',
-            type: 'symbol',
-            source: 'data',
-            minzoom: minzoom,
-            layout: {
-                'icon-image': 'Old',
-                'icon-ignore-placement': true,
-                'icon-offset': [-13, -12],
-                visibility: 'none',
-            },
-            filter: ['all'],
-        })
-
-        this.map.addLayer({
-            id: 'icon-fixme',
-            type: 'symbol',
-            source: 'data',
-            minzoom: minzoom,
-            layout: {
-                'icon-image': 'Fixme',
-                'icon-ignore-placement': true,
-                'icon-offset': [13, -12],
-                visibility: 'none',
-            },
-            filter: ['all', ['any', ['has', 'fixme'], ['has', 'deprecated']]],
-        })
-
-        this.map.addLayer({
-            id: 'marker',
-            type: 'symbol',
-            minzoom: minzoom,
-            source: 'data',
-            layout: getMarkerLayout(),
-            filter: ['all'],
-        })
-
-        this.map.addLayer({
-            id: 'marker_changed',
-            type: 'symbol',
-            source: 'data_changed',
-            minzoom: minzoom,
-            layout: getMarkerLayout(),
-            filter: ['all'],
-        })
-
-        this.map.addLayer({
-            id: 'icon-change',
-            type: 'symbol',
-            source: 'data_changed',
-            minzoom: minzoom,
-            layout: {
-                'icon-image': '{changeType}',
-                'icon-ignore-placement': true,
-                'icon-offset': [0, -35],
-            },
-            filter: ['all'],
-        })
-
+        this.installDataLayers()
         this.layersAreLoaded = true
 
         this.redrawBbox(this.dataService.getGeojsonBbox())
@@ -1412,12 +1644,315 @@ export class MapService {
             this.map
         )
 
-        const activeMap = this.map
-        const onClick = async (event: MapMouseEvent): Promise<void> => {
-            if (!this.mapCreated || this.map !== activeMap) return
-            const features = activeMap.queryRenderedFeatures(event.point, {
-                layers: this.configService.selecableLayers,
+        const deferredBasemap = this.deferredBasemap
+        this.deferredBasemap = undefined
+        if (deferredBasemap) {
+            this.displaySatelliteBaseMap(
+                deferredBasemap.baseMap,
+                deferredBasemap.isDisplay
+            )
+        }
+
+        // Location may be ready before the map finishes loading.
+        if (this.locationService.gpsIsReady()) {
+            this.locationService.publishCurrentLocation()
+        }
+
+        this.refreshBasemapTileJson()
+
+        if (!this.mapLoadAnnounced) {
+            this.mapLoadAnnounced = true
+            this.mapLoadedSubject.next()
+        }
+    }
+
+    private installDataLayers(): void {
+        const minzoom = 14
+        const addSource = (id: string): void => {
+            if (this.map.getSource(id)) return
+            this.map.addSource(id, {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: [] },
             })
+        }
+        const addLayer = (layer: AddLayerObject): void => {
+            if (!this.map.getLayer(layer.id)) this.map.addLayer(layer)
+        }
+
+        addSource('bbox')
+        addSource('data')
+        addSource('data_changed')
+        addSource('ways')
+        addSource('ways_changed')
+        addSource('location_circle')
+
+        addLayer({
+            id: 'bboxLayer',
+            type: 'line',
+            source: 'bbox',
+            paint: {
+                'line-color': '#ea1212',
+                'line-width': 5,
+                'line-dasharray': [2, 2],
+            },
+        })
+
+        addLayer({
+            id: 'way_fill',
+            type: 'fill',
+            minzoom: minzoom,
+            source: 'ways',
+            paint: {
+                'fill-color': { property: 'hexColor', type: 'identity' },
+                'fill-opacity': 0.3,
+            },
+            filter: [
+                'all',
+                // Types are not correct for the match filter used in the next line.
+                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
+                // prettier-ignore
+                [
+                    'match',
+                    ['geometry-type'],
+                    ['Polygon', 'MultiPolygon'],
+                    true,
+                    false,
+                ],
+            ],
+        })
+
+        addLayer({
+            id: 'way_line',
+            type: 'line',
+            source: 'ways',
+            minzoom: minzoom,
+            paint: {
+                'line-color': { property: 'hexColor', type: 'identity' },
+                'line-width': 4,
+                'line-opacity': 0.7,
+            },
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            // Types are not correct for the match filter used in the next line.
+            // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
+            // prettier-ignore
+            filter: [
+                'all',
+                [
+                    'match',
+                    ['geometry-type'],
+                    ['LineString', 'MultiLineString'],
+                    true,
+                    false,
+                ],
+            ],
+        })
+
+        addLayer({
+            id: 'way_fill_changed',
+            type: 'fill',
+            source: 'ways_changed',
+            paint: {
+                'fill-color': { property: 'hexColor', type: 'identity' },
+                'fill-opacity': 0.3,
+            },
+            filter: [
+                'all',
+                // Types are not correct for the match filter used in the next line.
+                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
+                // prettier-ignore
+                [
+                    'match',
+                    ['geometry-type'],
+                    ['Polygon', 'MultiPolygon'],
+                    true,
+                    false,
+                ],
+            ],
+        })
+
+        addLayer({
+            id: 'way_line_changed',
+            type: 'line',
+            source: 'ways_changed',
+            paint: {
+                'line-color': { property: 'hexColor', type: 'identity' },
+                'line-width': 4,
+                'line-opacity': 0.7,
+            },
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            filter: [
+                'all',
+                // Types are not correct for the match filter used in the next line.
+                // See this discussion for details: https://github.com/DoFabien/OsmGo/pull/117#discussion_r898447098
+                // prettier-ignore
+                [
+                    'match',
+                    ['geometry-type'],
+                    ['LineString', 'MultiLineString'],
+                    true,
+                    false,
+                ],
+            ],
+        })
+
+        // The bundled glyphs only cover the Latin, Greek and Cyrillic scripts:
+        // a name in another script is not drawn on the object layers.
+        addLayer({
+            id: 'label',
+            type: 'symbol',
+            minzoom: 16.5,
+            source: 'data',
+            layout: {
+                'icon-image': 'none',
+                'icon-anchor': 'bottom',
+                'text-field': '{_name}',
+                'text-font': ['Roboto-Regular'],
+                'text-allow-overlap': false,
+                'text-size': 11,
+                'text-offset': [0, 1],
+            },
+            paint: {
+                'text-color': '#0a0a0a',
+                'text-halo-color': 'rgba(255,255,255,1)',
+                'text-halo-width': 2,
+            },
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'label_changed',
+            type: 'symbol',
+            minzoom: 16.5,
+            source: 'data_changed',
+            layout: {
+                'icon-image': 'none',
+                'icon-anchor': 'bottom',
+                'text-field': '{_name}',
+                'text-font': ['Roboto-Regular'],
+                'text-allow-overlap': false,
+                'text-size': 11,
+                'text-offset': [0, 1],
+            },
+            paint: {
+                'text-color': '#0a0a0a',
+                'text-halo-color': 'rgba(255,255,255,1)',
+                'text-halo-width': 2,
+            },
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'icon-old',
+            type: 'symbol',
+            source: 'data',
+            minzoom: minzoom,
+            layout: {
+                'icon-image': 'Old',
+                'icon-ignore-placement': true,
+                'icon-offset': [-13, -12],
+                visibility: 'none',
+            },
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'icon-fixme',
+            type: 'symbol',
+            source: 'data',
+            minzoom: minzoom,
+            layout: {
+                'icon-image': 'Fixme',
+                'icon-ignore-placement': true,
+                'icon-offset': [13, -12],
+                visibility: 'none',
+            },
+            filter: ['all', ['any', ['has', 'fixme'], ['has', 'deprecated']]],
+        })
+
+        addLayer({
+            id: 'marker',
+            type: 'symbol',
+            minzoom: minzoom,
+            source: 'data',
+            layout: getMarkerLayout(),
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'marker_changed',
+            type: 'symbol',
+            source: 'data_changed',
+            minzoom: minzoom,
+            layout: getMarkerLayout(),
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'icon-change',
+            type: 'symbol',
+            source: 'data_changed',
+            minzoom: minzoom,
+            layout: {
+                'icon-image': '{changeType}',
+                'icon-ignore-placement': true,
+                'icon-offset': [0, -35],
+            },
+            filter: ['all'],
+        })
+
+        addLayer({
+            id: 'location_circle',
+            type: 'circle',
+            source: 'location_circle',
+            layout: {},
+            paint: {
+                'circle-color': '#9bbcf2',
+                'circle-opacity': 0.2,
+                'circle-radius': 0,
+                'circle-stroke-width': 1,
+                'circle-stroke-color': '#9bbcf2',
+                'circle-stroke-opacity': 0.5,
+                'circle-pitch-alignment': 'map',
+                'circle-radius-transition': { duration: 0 },
+            },
+        })
+
+        addLayer({
+            id: 'location_user',
+            type: 'symbol',
+            source: 'location_circle',
+            layout: {
+                'icon-size': 0.5,
+                'icon-image': 'location-without-orientation',
+                'icon-ignore-placement': true,
+                'icon-allow-overlap': true,
+                'icon-pitch-alignment': 'map',
+            },
+        })
+    }
+
+    /** Wires the map instance once; the handlers outlive style reloads. */
+    private wireMapInteractions(activeMap: MapLibreMap): void {
+        // The style is gone between a WebGL context loss and its restoration.
+        const layersReady = (): boolean =>
+            this.mapCreated && this.map === activeMap && this.layersAreLoaded
+        const onClick = async (event: MapMouseEvent): Promise<void> => {
+            if (!layersReady()) return
+            if (this.markerMoving() || this.markerMoveMoving()) return
+            const layers = this.configService.selecableLayers
+            let features = activeMap.queryRenderedFeatures(event.point, {
+                layers,
+            })
+            if (!features.length) {
+                const { x, y } = event.point
+                features = activeMap.queryRenderedFeatures(
+                    [
+                        [x - TAP_QUERY_RADIUS, y - TAP_QUERY_RADIUS],
+                        [x + TAP_QUERY_RADIUS, y + TAP_QUERY_RADIUS],
+                    ],
+                    { layers }
+                )
+            }
             if (!features.length) {
                 this.mapBackgroundClickSubject.next()
                 return
@@ -1444,12 +1979,17 @@ export class MapService {
         }
 
         const onTouchMove = (): void => {
-            this.headingIsLocked = false
-            this.positionIsFollow = false
+            this.stopFollowing()
+        }
+
+        const onUserCameraStart = (event: MapLibreEvent): void => {
+            if ((event as { originalEvent?: unknown }).originalEvent) {
+                this.stopFollowing()
+            }
         }
 
         const onRotate = (): void => {
-            if (!this.mapCreated || this.map !== activeMap) return
+            if (!layersReady()) return
             const trueHeading =
                 this.locationService.compassHeading().trueHeading
             if (
@@ -1470,11 +2010,39 @@ export class MapService {
         }
         activeMap.on('click', onClick)
         activeMap.on('touchmove', onTouchMove)
+        activeMap.on('dragstart', onUserCameraStart)
+        activeMap.on('zoomstart', onUserCameraStart)
+        activeMap.on('rotatestart', onUserCameraStart)
         activeMap.on('rotate', onRotate)
         this.lifecycle.trackCleanup(
             () => activeMap.off('click', onClick),
             () => activeMap.off('touchmove', onTouchMove),
+            () => activeMap.off('dragstart', onUserCameraStart),
+            () => activeMap.off('zoomstart', onUserCameraStart),
+            () => activeMap.off('rotatestart', onUserCameraStart),
             () => activeMap.off('rotate', onRotate)
+        )
+
+        const onVisibilityChange = (): void => {
+            if (this.document.visibilityState === 'hidden') this.saveLastView()
+        }
+        this.document.addEventListener('visibilitychange', onVisibilityChange)
+        this.lifecycle.trackCleanup(() =>
+            this.document.removeEventListener(
+                'visibilitychange',
+                onVisibilityChange
+            )
+        )
+
+        const view = this.document.defaultView
+        const onOnline = (): void => {
+            if (this.mapCreated && this.map === activeMap) {
+                this.refreshBasemapTileJson({ reloadTiles: true })
+            }
+        }
+        view?.addEventListener('online', onOnline)
+        this.lifecycle.trackCleanup(() =>
+            view?.removeEventListener('online', onOnline)
         )
 
         this.lifecycle.trackSession(
@@ -1484,15 +2052,21 @@ export class MapService {
                         if (heading.trueHeading === null) return false
                         return (
                             this.lastRenderedHeading === null ||
-                            Math.abs(
-                                heading.trueHeading - this.lastRenderedHeading
-                            ) > 1
+                            headingDelta(
+                                heading.trueHeading,
+                                this.lastRenderedHeading
+                            ) >= HEADING_MIN_DELTA
                         )
                     }),
-                    throttleTime(100)
+                    throttleTime(HEADING_RENDER_INTERVAL_MS)
                 )
                 .subscribe((heading) => {
-                    if (!this.mapCreated || this.map !== activeMap) return
+                    if (!layersReady()) return
+                    if (this.configService.freezeMapRenderer) return
+                    const lockedOnHeading =
+                        this.configService.config().lockMapHeading &&
+                        this.headingIsLocked
+                    if (lockedOnHeading && activeMap.isMoving()) return
                     if (this.lastRenderedHeading === null) {
                         activeMap.setLayoutProperty(
                             'location_user',
@@ -1502,11 +2076,11 @@ export class MapService {
                     }
                     this.lastRenderedHeading = heading.trueHeading
 
-                    if (
-                        this.configService.config().lockMapHeading &&
-                        this.headingIsLocked
-                    ) {
-                        activeMap.rotateTo(heading.trueHeading)
+                    if (lockedOnHeading) {
+                        activeMap.jumpTo(
+                            { bearing: heading.trueHeading },
+                            FOLLOW_EVENT_DATA
+                        )
                         activeMap.setLayoutProperty(
                             'location_user',
                             'icon-rotate',
@@ -1530,7 +2104,7 @@ export class MapService {
         this.lifecycle.trackSession(
             this.locationService.newLocation$.subscribe(
                 (geojsonPos: FeatureCollection) => {
-                    if (!this.mapCreated || this.map !== activeMap) return
+                    if (!layersReady()) return
                     const locationSource = activeMap.getSource(
                         'location_circle'
                     ) as GeoJSONSource
@@ -1547,27 +2121,45 @@ export class MapService {
                             )
                         }
 
-                        if (
-                            this.configService.config().followPosition &&
-                            this.positionIsFollow
-                        ) {
-                            activeMap.setCenter(coordinates)
-                            if (this.isFirstPosition) {
-                                activeMap.setZoom(18)
-                                this.isFirstPosition = false
+                        if (this.configService.freezeMapRenderer) return
+                        if (this.pendingRecenter) {
+                            if (
+                                this.markerMoving() ||
+                                this.markerMoveMoving()
+                            ) {
+                                this.pendingRecenter = false
+                            } else {
+                                this.centerOnMyPosition()
                             }
+                            return
                         }
+                        this.followPosition(activeMap, coordinates)
                     }
                 }
             )
         )
+    }
 
-        // Location may be ready before the map finishes loading.
-        if (this.locationService.gpsIsReady()) {
-            this.locationService.publishCurrentLocation()
+    private followPosition(
+        activeMap: MapLibreMap,
+        coordinates: LngLatLike
+    ): void {
+        const config = this.configService.config()
+        if (!config.followPosition || !this.positionIsFollow) return
+        if (activeMap.isMoving()) return
+        const camera: JumpToOptions = { center: coordinates }
+        if (this.isFirstPosition) {
+            this.isFirstPosition = false
+            camera.zoom = Math.max(activeMap.getZoom(), GPS_START_ZOOM)
         }
-
-        this.mapLoadedSubject.next()
+        if (
+            config.lockMapHeading &&
+            this.headingIsLocked &&
+            this.lastRenderedHeading !== null
+        ) {
+            camera.bearing = this.lastRenderedHeading
+        }
+        activeMap.jumpTo(camera, FOLLOW_EVENT_DATA)
     }
 
     async addMissingIconsToMap(
@@ -1641,32 +2233,29 @@ export class MapService {
                 return
             }
             const pxRatio = spriteParams.pixelRatio || 1
-            const pathSprites =
-                pxRatio === 1
-                    ? this.assetUrl('assets/mapStyle/sprites/sprites.png')
-                    : this.assetUrl('assets/mapStyle/sprites/sprites@2x.png')
+            const cachedSheet = this.spritesCache[pxRatio]
 
-            if (this.spritesCache) {
-                const spriteImage = this.spritesCache
-                const canvas = this.createCanvasFromSprite(
-                    spriteImage,
-                    spriteParams
-                )
-                resolve(canvas)
+            if (cachedSheet) {
+                resolve(this.createCanvasFromSprite(cachedSheet, spriteParams))
             } else {
                 const spriteImage = new Image()
                 spriteImage.onload = () => {
-                    this.spritesCache = spriteImage
-                    const canvas = this.createCanvasFromSprite(
-                        spriteImage,
-                        spriteParams
-                    )
-                    resolve(canvas)
+                    this.spritesCache[pxRatio] = spriteImage
+                    try {
+                        resolve(
+                            this.createCanvasFromSprite(
+                                spriteImage,
+                                spriteParams
+                            )
+                        )
+                    } catch (error) {
+                        reject(error)
+                    }
                 }
                 spriteImage.onerror = (error) => {
                     reject(error)
                 }
-                spriteImage.src = pathSprites
+                spriteImage.src = this.assetUrl(spriteSheetPath(pxRatio))
             }
         })
     }

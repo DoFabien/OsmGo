@@ -17,14 +17,15 @@
     </button>
 </div>
 
-@if (dataService.changedFeatureCount() > 0 && !mapService.markerMoving()) {
+@if ((dataService.changedFeatureCount() > 0 ||
+initService.uploadNeedsAttention()) && !mapService.markerMoving()) {
 <div class="map-control map-control--pending">
     <button
         mat-icon-button
         class="osmgo-map-button osmgo-map-button--pending"
         type="button"
         data-testid="open-upload"
-        [matBadge]="dataService.changedFeatureCount()"
+        [matBadge]="dataService.changedFeatureCount() || '!'"
         matBadgeColor="warn"
         [matTooltip]="'MAIN.BUTTONS.UPLOAD' | translate"
         [attr.aria-label]="'MAIN.BUTTONS.UPLOAD' | translate"
@@ -35,7 +36,8 @@
         >
     </button>
 </div>
-} @if (!mapService.markerMoving() && !mapService.markerMoveMoving()) {
+} @if (!mapUnavailable() && !mapService.markerMoving() &&
+!mapService.markerMoveMoving()) {
 <div class="map-action-dock map-action-dock--browse">
     <button
         mat-icon-button
@@ -67,16 +69,26 @@
         class="refresh-button"
         type="button"
         data-testid="load-osm-data"
-        [disabled]="
-                mapService.isProcessing() ||
-                (configService.currentZoom() ?? 0) < 14
-            "
-        [matTooltip]="'MAIN.BUTTONS.LOAD_DATA' | translate"
-        [attr.aria-label]="'MAIN.BUTTONS.LOAD_DATA' | translate"
-        (click)="refreshRequested.emit()"
+        [disabled]="mapService.isBusy() || refreshBlockedByZoom()"
+        [disabledInteractive]="
+            refreshBlockedByZoom() && !mapService.isBusy()
+        "
+        [matTooltip]="
+            (refreshBlockedByZoom()
+                ? 'MAIN.BUTTONS.REFRESH_ZOOM_HINT'
+                : 'MAIN.BUTTONS.LOAD_DATA'
+            ) | translate
+        "
+        [attr.aria-label]="
+            (mapService.isBusy()
+                ? 'MAIN.BUTTONS.LOADING_DATA'
+                : 'MAIN.BUTTONS.REFRESH_DATA'
+            ) | translate
+        "
+        (click)="requestRefresh()"
     >
         <span class="refresh-button__content">
-            @if (mapService.isProcessing()) {
+            @if (mapService.isBusy()) {
             <mat-spinner diameter="22"></mat-spinner>
             } @else {
             <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
@@ -84,7 +96,7 @@
             >
             }
             <span class="refresh-button__label">
-                {{ (mapService.isProcessing() ? 'MAIN.BUTTONS.LOADING_DATA' :
+                {{ (mapService.isBusy() ? 'MAIN.BUTTONS.LOADING_DATA' :
                 'MAIN.BUTTONS.REFRESH_DATA' ) | translate }}
             </span>
         </span>
@@ -95,7 +107,7 @@
         class="dock-button geolocation-button"
         type="button"
         data-testid="center-on-gps"
-        [disabled]="!locationService.gpsIsReady()"
+        [class.is-searching]="!locationService.gpsIsReady()"
         [matTooltip]="'MAIN.BUTTONS.CENTER_GPS' | translate"
         [attr.aria-label]="'MAIN.BUTTONS.CENTER_GPS' | translate"
         (click)="centerOnMyPosition()"

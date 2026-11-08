@@ -1,4 +1,5 @@
-import type { Routes } from '@angular/router'
+import { inject } from '@angular/core'
+import { Router, type Routes } from '@angular/router'
 import { MainPage } from '@components/main/main'
 
 export const routes: Routes = [
@@ -40,12 +41,25 @@ export const routes: Routes = [
                     ).then((module) => module.ManageTagsComponent),
             },
             {
-                path: 'basemaps/:lng/:lat',
+                // Coordinates stay in the query: a last path segment with a dot
+                // is served as a missing file when the page is reloaded.
+                path: 'basemaps',
                 data: { overlaySize: 'wide' },
                 loadComponent: () =>
                     import('@components/basemaps/basemaps.component').then(
                         (module) => module.BasemapsComponent
                     ),
+            },
+            {
+                path: 'basemaps/:lng/:lat',
+                redirectTo: ({ params, queryParams }) =>
+                    inject(Router).createUrlTree(['/basemaps'], {
+                        queryParams: {
+                            ...queryParams,
+                            lng: params['lng'],
+                            lat: params['lat'],
+                        },
+                    }),
             },
         ],
     },

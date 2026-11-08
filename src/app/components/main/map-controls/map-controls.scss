@@ -125,7 +125,7 @@ button {
     height: 48px;
     overflow: hidden;
     padding: 0 14px 0 12px;
-    color: white;
+    color: var(--osmgo-on-blue);
     border-radius: 20px;
     background: var(--osmgo-blue);
     font-size: 0.9375rem;
@@ -168,10 +168,10 @@ button {
         display: inline-block;
         flex: 0 0 22px;
         margin-right: 9px;
-        --mdc-circular-progress-active-indicator-color: white;
     }
 
-    &:disabled {
+    &:disabled,
+    &[aria-disabled='true'] {
         color: var(--osmgo-ink-muted);
         background: var(--osmgo-surface-muted);
     }
@@ -191,7 +191,7 @@ button {
             'opsz' 28;
     }
 
-    &:disabled {
+    &.is-searching {
         color: var(--osmgo-ink-muted);
         background: var(--osmgo-surface-muted);
     }
@@ -231,11 +231,12 @@ button {
 }
 
 .confirm-button {
-    color: white;
+    color: var(--osmgo-on-blue);
     background: var(--osmgo-blue);
 }
 
 .dock-button--cancel {
+    --mat-icon-button-icon-color: var(--osmgo-error);
     color: var(--osmgo-error);
 }
 

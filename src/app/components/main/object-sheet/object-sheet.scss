@@ -36,7 +36,7 @@
     border-radius: 28px 28px 0 0;
     color: var(--osmgo-ink-strong);
     background: var(--osmgo-surface);
-    box-shadow: 0 -8px 32px rgba(31, 49, 44, 0.13);
+    box-shadow: 0 -8px 32px var(--osmgo-shadow);
     pointer-events: auto;
     transition: transform 160ms ease-out;
 }
@@ -106,7 +106,7 @@
     overflow: hidden;
     place-items: center;
     border-radius: 16px;
-    background: var(--osmgo-blue);
+    background: var(--osmgo-icon-fill);
 
     app-icon {
         width: 100%;
@@ -290,20 +290,25 @@
 
 .sheet-notice {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 4px 10px;
     padding: 12px 14px;
     border-radius: 16px;
 
     p {
         min-width: 0;
-        flex: 1;
+        flex: 1 1 12rem;
         margin: 0;
         line-height: 1.35;
     }
 
+    // The action drops below the message when both do not fit on one line.
     button {
-        flex: 0 0 auto;
+        flex: 0 1 auto;
+        max-width: 100%;
+        margin-inline-start: auto;
+        white-space: normal;
     }
 }
 
@@ -386,7 +391,7 @@
 .sheet-resize-action {
     align-self: center;
     color: var(--osmgo-blue);
-    border: 1px solid var(--osmgo-outline-soft);
+    border: 1px solid var(--osmgo-outline);
 
     &.is-expanded {
         background: var(--osmgo-blue-container);
@@ -395,11 +400,11 @@
 
 .close-action {
     color: var(--osmgo-blue);
-    border-color: var(--osmgo-outline-soft);
+    border-color: var(--osmgo-outline);
 }
 
 .primary-action {
-    color: white;
+    color: var(--osmgo-on-blue);
     background: var(--osmgo-blue);
 }
 

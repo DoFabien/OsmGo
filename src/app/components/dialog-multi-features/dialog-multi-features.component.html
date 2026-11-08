@@ -11,7 +11,10 @@
 
     <mat-dialog-content>
         <div class="feature-list" role="list">
-            @for (feature of features(); track feature.properties.id) {
+            @for (
+                feature of features();
+                track feature.properties.type + '/' + feature.properties.id
+            ) {
                 <button
                     class="feature-row"
                     type="button"
@@ -34,7 +37,7 @@
                                 {{ feature.properties._name }}
                             } @else {
                                 <span class="noname">{{
-                                    'SHARED.UNDEFINED' | translate
+                                    'MODAL_SELECTED_ITEM.NO_NAME' | translate
                                 }}</span>
                             }
                         </strong>

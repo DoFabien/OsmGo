@@ -6,6 +6,10 @@ import type { Feature, MultiPolygon, Polygon } from 'geojson'
 import { defer, type Observable } from 'rxjs'
 import { map, shareReplay } from 'rxjs/operators'
 
+/** MapLibre cannot fill the `{wkid}` placeholder of ArcGIS export URLs. */
+export const hasSupportedTileUrls = (basemap: Basemap): boolean =>
+    !basemap.tiles.some((tile) => tile.includes('{wkid}'))
+
 export interface Basemap {
     id: string
     name: string
@@ -31,6 +35,7 @@ export class BasemapsService {
                 const result: Basemap[] = []
                 const p = point([lng, lat])
                 for (const feature of features) {
+                    if (!hasSupportedTileUrls(feature.properties)) continue
                     if (feature.geometry) {
                         if (booleanPointInPolygon(p, feature)) {
                             result.push(feature.properties)

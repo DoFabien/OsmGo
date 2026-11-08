@@ -2,25 +2,37 @@ import { signal } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import { Router } from '@angular/router'
 import { TranslateModule, TranslateService } from '@ngx-translate/core'
+import { AlertService } from '@services/alert.service'
 import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
+import { InitService } from '@services/init.service'
 import { LocationService } from '@services/location.service'
 import { MapService } from '@services/map.service'
 
 import { MapControlsComponent } from './map-controls'
 
 describe('MapControlsComponent', () => {
-    const isProcessing = signal(false)
+    const isBusy = signal(false)
+    const currentZoom = signal(18)
+    const gpsIsReady = signal(false)
+    const uploadNeedsAttention = signal(false)
+    const geolocationIssue = signal<
+        'denied' | 'unavailable' | 'timeout' | null
+    >(null)
 
     beforeEach(() => {
-        isProcessing.set(false)
+        isBusy.set(false)
+        currentZoom.set(18)
+        gpsIsReady.set(false)
+        uploadNeedsAttention.set(false)
+        geolocationIssue.set(null)
         TestBed.configureTestingModule({
             imports: [MapControlsComponent, TranslateModule.forRoot()],
             providers: [
                 {
                     provide: ConfigService,
                     useValue: {
-                        currentZoom: () => 18,
+                        currentZoom,
                         getBasemap: () => ({}),
                     },
                 },
@@ -29,10 +41,16 @@ describe('MapControlsComponent', () => {
                     useValue: { changedFeatureCount: () => 0 },
                 },
                 {
+                    provide: InitService,
+                    useValue: { uploadNeedsAttention },
+                },
+                {
                     provide: LocationService,
                     useValue: {
-                        gpsIsReady: () => false,
+                        geolocationIssue,
+                        gpsIsReady,
                         requestHeadingPermission: vi.fn(),
+                        resumeGeolocation: vi.fn(),
                     },
                 },
                 {
@@ -41,7 +59,7 @@ describe('MapControlsComponent', () => {
                         centerOnMyPosition: vi.fn(),
                         displaySatelliteBaseMap: vi.fn(),
                         isDisplaySatelliteBaseMap: () => false,
-                        isProcessing,
+                        isBusy,
                         loadingData: () => false,
                         markerMoveMoving: () => false,
                         markerMoving: () => false,
@@ -61,7 +79,13 @@ describe('MapControlsComponent', () => {
                     LOADING_DATA: 'Chargement',
                     MENU: 'Menu',
                     REFRESH_DATA: 'Actualiser',
+                    REFRESH_ZOOM_HINT: 'Zoomez pour télécharger',
                     VIEW_AREAL_MAP: 'Imagerie aérienne',
+                },
+                LOCATION: {
+                    DENIED: 'Position bloquée',
+                    SEARCHING: 'Recherche de la position',
+                    UNAVAILABLE: 'Position indisponible',
                 },
             },
         })
@@ -114,7 +138,7 @@ describe('MapControlsComponent', () => {
 
     it('keeps an explicit loading state on the primary action', () => {
         const fixture = TestBed.createComponent(MapControlsComponent)
-        isProcessing.set(true)
+        isBusy.set(true)
         fixture.detectChanges()
 
         const refreshButton = fixture.nativeElement.querySelector(
@@ -147,5 +171,137 @@ describe('MapControlsComponent', () => {
         ).toBeLessThan(
             vi.mocked(mapService.centerOnMyPosition).mock.invocationCallOrder[0]
         )
+    })
+
+    it('keeps the geolocation button usable while there is no position', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.detectChanges()
+
+        const button = fixture.nativeElement.querySelector(
+            '[data-testid="center-on-gps"]'
+        ) as HTMLButtonElement
+
+        expect(button.disabled).toBe(false)
+        expect(button.classList).toContain('is-searching')
+
+        gpsIsReady.set(true)
+        fixture.detectChanges()
+
+        expect(button.classList).not.toContain('is-searching')
+    })
+
+    it('asks for a position again and explains the state when there is no fix', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        const locationService = TestBed.inject(LocationService)
+        const mapService = TestBed.inject(MapService)
+        const showAlert = vi.spyOn(TestBed.inject(AlertService), 'showAlert')
+
+        fixture.componentInstance.centerOnMyPosition()
+
+        expect(locationService.resumeGeolocation).toHaveBeenCalledOnce()
+        expect(showAlert).toHaveBeenCalledWith('Recherche de la position')
+        expect(mapService.centerOnMyPosition).toHaveBeenCalledOnce()
+    })
+
+    it.each([
+        ['denied', 'Position bloquée'],
+        ['unavailable', 'Position indisponible'],
+        ['timeout', 'Recherche de la position'],
+    ] as const)('reports a %s position issue', (issue, message) => {
+        geolocationIssue.set(issue)
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        const showAlert = vi.spyOn(TestBed.inject(AlertService), 'showAlert')
+
+        fixture.componentInstance.centerOnMyPosition()
+
+        expect(showAlert).toHaveBeenCalledWith(message)
+    })
+
+    it('centers straight away when a position is known', () => {
+        gpsIsReady.set(true)
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        const locationService = TestBed.inject(LocationService)
+        const mapService = TestBed.inject(MapService)
+        const showAlert = vi.spyOn(TestBed.inject(AlertService), 'showAlert')
+
+        fixture.componentInstance.centerOnMyPosition()
+
+        expect(locationService.resumeGeolocation).not.toHaveBeenCalled()
+        expect(showAlert).not.toHaveBeenCalled()
+        expect(mapService.centerOnMyPosition).toHaveBeenCalledOnce()
+    })
+
+    it('names the refresh button after its visible text', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.detectChanges()
+        const refreshButton = fixture.nativeElement.querySelector(
+            '[data-testid="load-osm-data"]'
+        ) as HTMLButtonElement
+
+        expect(refreshButton.getAttribute('aria-label')).toBe('Actualiser')
+        expect(refreshButton.textContent).toContain(
+            refreshButton.getAttribute('aria-label') as string
+        )
+
+        isBusy.set(true)
+        fixture.detectChanges()
+
+        expect(refreshButton.getAttribute('aria-label')).toBe('Chargement')
+    })
+
+    it('explains the disabled refresh below the minimum download zoom', () => {
+        currentZoom.set(12)
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        const refreshRequested = vi.fn()
+        fixture.componentInstance.refreshRequested.subscribe(refreshRequested)
+        const showAlert = vi.spyOn(TestBed.inject(AlertService), 'showAlert')
+        fixture.detectChanges()
+        const refreshButton = fixture.nativeElement.querySelector(
+            '[data-testid="load-osm-data"]'
+        ) as HTMLButtonElement
+
+        expect(refreshButton.getAttribute('aria-disabled')).toBe('true')
+        expect(refreshButton.classList).toContain(
+            'mat-mdc-button-disabled-interactive'
+        )
+
+        refreshButton.click()
+
+        expect(refreshRequested).not.toHaveBeenCalled()
+        expect(showAlert).toHaveBeenCalledWith('Zoomez pour télécharger')
+
+        currentZoom.set(15)
+        fixture.detectChanges()
+        refreshButton.click()
+
+        expect(refreshButton.getAttribute('aria-disabled')).toBeNull()
+        expect(refreshRequested).toHaveBeenCalledOnce()
+    })
+
+    it('hides the map actions when the map could not start but keeps the menu', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.componentRef.setInput('mapUnavailable', true)
+        fixture.detectChanges()
+        const element: HTMLElement = fixture.nativeElement
+
+        expect(element.querySelector('.map-action-dock--browse')).toBeNull()
+        expect(
+            element.querySelector('[data-testid="open-menu"]')
+        ).not.toBeNull()
+    })
+
+    it('shows the upload button with an attention badge when an upload needs attention', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.detectChanges()
+        const element: HTMLElement = fixture.nativeElement
+
+        expect(element.querySelector('[data-testid="open-upload"]')).toBeNull()
+
+        uploadNeedsAttention.set(true)
+        fixture.detectChanges()
+
+        const upload = element.querySelector('[data-testid="open-upload"]')
+        expect(upload).not.toBeNull()
+        expect(upload?.textContent).toContain('!')
     })
 })
