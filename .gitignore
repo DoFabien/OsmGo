@@ -56,3 +56,6 @@ keystore.properties
 .env.android-signing
 
 android/app/capacitor.build.gradle
+
+# Local notes, reviews and signing material
+wFabien/
