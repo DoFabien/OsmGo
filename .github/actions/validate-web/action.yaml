@@ -4,6 +4,10 @@ description: Run every source, catalog, and browser check required before deploy
 runs:
     using: composite
     steps:
+        - name: Audit production dependencies
+          shell: bash
+          run: npm audit --omit=dev --audit-level=high
+
         - name: Check source code
           shell: bash
           run: npm run check
@@ -31,6 +35,10 @@ runs:
         - name: Run sprite tests
           shell: bash
           run: npm run test:sprites
+
+        - name: Build the PWA
+          shell: bash
+          run: npm run build
 
         - name: Install Chromium
           shell: bash

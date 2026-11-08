@@ -33,8 +33,5 @@ jobs:
             - name: Validate source and behavior
               uses: ./.github/actions/validate-web
 
-            - name: Build the PWA
-              run: npm run build
-
             - name: Validate the PWA cache manifest
               run: npm run pwa:validate:built
