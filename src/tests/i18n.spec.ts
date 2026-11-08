@@ -43,26 +43,87 @@ describe('interface translations', () => {
     const english = readTranslations('en')
     const englishKeys = new Set(listTranslationKeys(english))
 
-    it('only exposes populated catalogs as interface languages', () => {
-        const i18nConfig = JSON.parse(
-            readFileSync(path.join(translationsDirectory, 'i18n.json'), 'utf8')
-        ) as { uiLanguages: string[] }
-        const populatedLanguages = readdirSync(translationsDirectory)
-            .filter(
-                (fileName) =>
-                    fileName.endsWith('.json') && fileName !== 'i18n.json'
-            )
-            .filter(
-                (fileName) =>
-                    Object.keys(readTranslations(fileName.replace('.json', '')))
-                        .length > 0
-            )
-            .map((fileName) => fileName.replace('.json', ''))
-            .sort()
+    describe('interface language list', () => {
+        const uiLanguages = (
+            JSON.parse(
+                readFileSync(
+                    path.join(translationsDirectory, 'i18n.json'),
+                    'utf8'
+                )
+            ) as { uiLanguages: string[] }
+        ).uiLanguages
 
-        expect([...new Set(i18nConfig.uiLanguages)].sort()).toEqual(
-            populatedLanguages
-        )
+        // Languages below this share of the English keys would show mostly
+        // English text: they are kept out of the list, not deleted.
+        const MIN_COVERAGE = 0.1
+        const coverage = (language: string): number => {
+            const keys = listTranslationKeys(readTranslations(language))
+            return (
+                keys.filter((key) => englishKeys.has(key)).length /
+                englishKeys.size
+            )
+        }
+
+        it('always offers English and French', () => {
+            expect(uiLanguages).toEqual(expect.arrayContaining(['en', 'fr']))
+        })
+
+        it('only offers languages whose catalog is meaningfully translated', () => {
+            const tooEmpty = uiLanguages.filter(
+                (language) => coverage(language) < MIN_COVERAGE
+            )
+
+            expect(tooEmpty).toEqual([])
+        })
+
+        it('keeps the nearly empty catalogs out of the list', () => {
+            for (const language of ['es', 'ko']) {
+                expect(coverage(language)).toBeLessThan(MIN_COVERAGE)
+                expect(uiLanguages).not.toContain(language)
+            }
+        })
+
+        it('has a catalog for every offered language', () => {
+            const files = readdirSync(translationsDirectory)
+
+            expect(
+                uiLanguages.filter(
+                    (language) => !files.includes(`${language}.json`)
+                )
+            ).toEqual([])
+        })
+    })
+
+    it('does not give two different actions the same label', () => {
+        for (const language of ['en', 'fr']) {
+            const shared = readTranslations(language)['SHARED'] as Record<
+                string,
+                string
+            >
+
+            expect(shared['CLEAR']).not.toBe(shared['CANCEL'])
+        }
+    })
+
+    it('translates the label of the deprecated tag fix button', () => {
+        const alert = (code: string) =>
+            readTranslations(code)['ALERT'] as Record<string, string>
+
+        expect(alert('fr')['FIX']).toBe('Corriger')
+        expect(alert('en')['FIX']).toBe('Fix')
+    })
+
+    it('keeps the known French typos out of the catalog', () => {
+        const text = JSON.stringify(readTranslations('fr'))
+
+        for (const typo of [
+            'check:date',
+            'Cacher les surface ',
+            'à été',
+            'du marker',
+        ]) {
+            expect(text).not.toContain(typo)
+        }
     })
 
     it('keeps French interface keys aligned with English', () => {

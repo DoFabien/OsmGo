@@ -26,18 +26,13 @@
     },
     "ABOUT": {
         "ABOUT": "Tentang",
-        "SOURCES": "Sumber",
         "DATA": "Data",
         "VERSION": "Versi",
         "OSM_CONTRIBUTORS": "© Kontributor OpenStreetMap"
     },
     "LOGIN": {
         "LOGIN": "Masuk",
-        "USERNAME_PLACEHOLDER": "Surel atau nama pengguna OpenStreetMap",
-        "PASSWORD_PLACEHOLDER": "Kata sandi",
-        "LOGIN_BUTTON": "Masuk",
-        "LOGIN_OAUTH": "Masuk dengan OAuth",
-        "SAVE_PASSWORD": "Simpan kata sandi Anda"
+        "LOGIN_BUTTON": "Masuk"
     },
     "SEND_DATA": {
         "SEND_DATA": "Unggah data",
@@ -53,7 +48,6 @@
         "DELETE": "Hapus",
         "DELETE_CONFIRM_HEADER": "Apa Anda yakin?",
         "DELETE_CONFIRM_MESSAGE": "Hapus semua perubahan?",
-        "PASSWORD_OSM": "Kata sandi OSM",
         "CANCEL_THIS_CHANGE": "Batalkan perubahan ini",
         "UPLOADING_DATA_TO_OSM": "Mengunggah perubahan ke OpenStreetMap...",
         "DONT_CLOSE": "Harap tidak menutup halaman ini"
@@ -72,12 +66,6 @@
     },
     "MODAL_SELECTED_ITEM": {
         "LOADING": "Memuat...",
-        "META_VERSION": "Versi:",
-        "META_CREATED_AT_DATE": "Ditambahkan pada:",
-        "META_UPDATED_AT_DATE": "Diperbarui pada:",
-        "META_CREATED_AT_DATE_TIME_AGO": "Ditambahkan",
-        "META_UPDATED_AT_DATE_TIME_AGO": "Diperbarui",
-        "META_BY": "Oleh:",
         "META_MYSELF": "Saya sendiri",
         "NO_NAME": "Tak ada nama",
         "PLACEHOLDER_NAME": "Nama",

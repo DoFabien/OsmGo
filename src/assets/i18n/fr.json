@@ -5,7 +5,6 @@
         "CANCEL": "Annuler",
         "CONFIRM": "Confirmer",
         "ADD": "Ajouter",
-        "VALIDATE": "Valider",
         "OK": "Ok",
         "UNKNOWN": "Inconnu",
         "UNDEFINED": "Indéfini",
@@ -18,8 +17,11 @@
         "SEARCH": "Rechercher",
         "SAVE": "Sauvegarder",
         "DELETE": "Supprimer",
-        "CLEAR": "Annuler",
-        "ERROR": "Une erreur est survenue. Vos modifications ont été conservées."
+        "CLEAR": "Effacer",
+        "ERROR": "Une erreur est survenue. Vos modifications ont été conservées.",
+        "NO_RESULTS": "Aucun résultat",
+        "RETRY": "Réessayer",
+        "CLEAR_FIELD": "Effacer « {{field}} »"
     },
     "A11Y": {
         "ADD_BOOKMARK": "Ajouter aux favoris",
@@ -27,16 +29,14 @@
         "CENTER_FEATURE": "Centrer l’objet sur la carte",
         "CHANGE_SUMMARY": "Résumé des modifications",
         "CODE": "Afficher ou masquer les codes des tags",
-        "COPY_FIELDS": "Mémoriser ces attributs",
+        "COPY_FIELDS": "Mémoriser ces champs",
         "HIDE_TAG": "Masquer ce tag",
         "LOCATION": "Position",
         "MAIN_NAVIGATION": "Navigation principale",
         "OBJECT_FIELDS": "Champs de l’objet",
-        "OBJECT_INFORMATION": "Informations de l’objet",
         "OPEN_LINK": "Ouvrir le lien",
         "OSM_ACCOUNT": "Compte OpenStreetMap",
-        "OSM_METADATA": "Métadonnées OpenStreetMap",
-        "PASTE_FIELDS": "Réutiliser les derniers attributs · {{category}}",
+        "PASTE_FIELDS": "Réutiliser les derniers champs · {{category}}",
         "REMOVE_BOOKMARK": "Retirer des favoris",
         "REMOVE_TAG": "Supprimer ce tag",
         "SELECTED": "Sélectionné",
@@ -50,13 +50,14 @@
         "WHAT_ITEM": "Lequel ?",
         "SELECT_ITEM_AT_LOCATION": "Sélectionnez l’objet voulu à cet emplacement.",
         "LOAD_BBOX": "Charger les données de l'emprise ?",
-        "CREATING_MISSING_ICONS": "Création des icônes manquantes…",
         "STARTUP": {
             "TITLE": "Osm Go! n’a pas pu démarrer",
             "REQUIRED_RESOURCE_FAILED": "Une ressource indispensable n’a pas pu être chargée. Vérifiez votre connexion, puis réessayez.",
-            "CORRUPTED_STORAGE": "Les données cartographiques locales sont illisibles. Réessayez d’abord, puis réinitialisez-les si le problème persiste. La réinitialisation supprime les données téléchargées et les modifications en attente.",
+            "CORRUPTED_STORAGE": "Les données cartographiques locales sont illisibles. Réessayez d’abord, puis réinitialisez-les si le problème persiste. La réinitialisation retire de l’application les données téléchargées et les modifications en attente, et en garde une copie de sauvegarde sur cet appareil quand c’est possible.",
             "RETRY": "Réessayer",
-            "RESET_LOCAL_DATA": "Réinitialiser les données locales"
+            "RESET_LOCAL_DATA": "Réinitialiser les données locales",
+            "QUARANTINE_NOTICE": "Certains objets locaux étaient illisibles et ont été mis de côté ({{count}}). Vous pouvez les exporter depuis l’écran d’envoi.",
+            "RESET_FAILED": "Les données n’ont pas pu être sauvegardées : rien n’a été supprimé."
         },
         "MAP_INITIALIZATION": {
             "TITLE": "La carte n’a pas pu démarrer",
@@ -75,7 +76,8 @@
                 "LABEL": "Objets à cet endroit",
                 "PREVIOUS": "Objet précédent",
                 "NEXT": "Objet suivant",
-                "LIST": "Afficher tous les objets à cet endroit"
+                "LIST": "Afficher tous les objets à cet endroit",
+                "POSITION": "{{index}} / {{count}}, afficher tous les objets à cet endroit"
             },
             "EXPAND_PANEL": "Déployer la fiche",
             "REDUCE_PANEL": "Réduire la fiche",
@@ -95,8 +97,16 @@
             "FIELDS": {
                 "ARTIST": "Artiste",
                 "MATERIAL": "Matériau",
-                "START_DATE": "Date d'installation"
-            }
+                "START_DATE": "Date de début",
+                "OPTION_VALUE": "{{label}} : {{value}}",
+                "VALUE_NO": "non",
+                "VALUE_ONLY": "uniquement"
+            },
+            "REVERT_LOCAL": "Abandonner mes modifications locales",
+            "REVERT_LOCAL_TITLE": "Abandonner vos modifications locales ?",
+            "REVERT_LOCAL_MESSAGE": "L’objet reviendra à la dernière version téléchargée depuis OpenStreetMap.",
+            "REVERT_LOCAL_MESSAGE_CREATED": "Cet objet créé n’a pas encore été envoyé et sera supprimé.",
+            "REVERT_LOCAL_MESSAGE_DELETED": "L’objet ne sera plus marqué comme supprimé."
         },
         "BUTTONS": {
             "MENU": "Menu",
@@ -109,8 +119,21 @@
             "ADD_NEW": "Créer un objet",
             "CENTER_GPS": "Centrer la carte sur ma position",
             "CONFIRM_ADD": "Ajouter un objet",
-            "CONFIRM_MOVE": "Déplacer un objet"
-        }
+            "CONFIRM_MOVE": "Déplacer un objet",
+            "REFRESH_ZOOM_HINT": "Zoomez pour télécharger les données"
+        },
+        "LOCATION": {
+            "DENIED": "L’accès à la position est bloqué. Autorisez-le dans les réglages de votre appareil pour voir votre position.",
+            "UNAVAILABLE": "Votre position n’est pas disponible pour le moment. Vérifiez que la localisation est activée.",
+            "SEARCHING": "Recherche de votre position…"
+        },
+        "SW": {
+            "INSTALLATION_FAILED": "La nouvelle version n’a pas pu être installée.",
+            "UNRECOVERABLE": "L’application doit être rechargée pour continuer à fonctionner.",
+            "RELOAD": "Recharger",
+            "EXTERNAL_STATE": "Les données ont été modifiées dans un autre onglet. Rechargez pour continuer."
+        },
+        "LINKED_OBJECT_NOT_FOUND": "L’objet du lien est introuvable dans les données téléchargées."
     },
     "MENU": {
         "CONNECTION": "Se connecter à OpenStreetMap",
@@ -123,24 +146,18 @@
         "EXIT": "Quitter",
         "NEW_VERSION": "Nouvelle version disponible !",
         "INSTALL_UPDATE": "Installer la dernière version",
-        "TAG_MANAGEMENT": "Gestion des tags"
+        "TAG_MANAGEMENT": "Gestion des tags",
+        "LOGIN_ERROR": "Impossible de lancer la connexion à OpenStreetMap. Vérifiez votre connexion puis réessayez."
     },
     "ABOUT": {
         "ABOUT": "À propos",
-        "SOURCES": "Sources",
         "DATA": "Données",
         "VERSION": "Version",
         "OSM_CONTRIBUTORS": "© Contributeurs d’OpenStreetMap"
     },
     "LOGIN": {
         "LOGIN": "Se connecter",
-        "USERNAME_PLACEHOLDER": "Email ou nom d'utilisateur OpenStreetMap",
-        "PASSWORD_PLACEHOLDER": "Mot de passe",
-        "LOGIN_BUTTON": "Se connecter",
-        "LOGIN_OAUTH": "Se connecter en utilisant OAuth",
-        "SAVE_PASSWORD": "Sauvegarder votre mot de passe",
-        "SAVED_PASSWORD_HINT": "Votre mot de passe sera sauvegardé en clair dans le cache de l'application",
-        "NOT_SAVED_PASSWORD_HINT": "Votre mot de passe vous sera demandé avant chaque envoi"
+        "LOGIN_BUTTON": "Se connecter"
     },
     "SEND_DATA": {
         "SEND_DATA": "Envoyer les données",
@@ -152,7 +169,6 @@
         "TOTAL_ITEMS": "Total",
         "CHANGESET_COMMENT": "Commentaire du changeset",
         "TYPE": "Type",
-        "PRIMARY_KEY": "Clé principale",
         "NAME": "Nom",
         "ERROR": "Erreur",
         "SEND": "Envoyer !",
@@ -160,8 +176,7 @@
         "SEND_CHANGES": "Envoyer {{count}} modifications",
         "DELETE": "Supprimer",
         "DELETE_CONFIRM_HEADER": "Vraiment ?",
-        "DELETE_CONFIRM_MESSAGE": "Supprimer toutes les modifications ?",
-        "PASSWORD_OSM": "Mot de passe OSM",
+        "DELETE_CONFIRM_MESSAGE": "Les modifications de {{count}} objets seront définitivement perdues. Cette action est irréversible.",
         "CANCEL_THIS_CHANGE": "Annuler cette modification",
         "UPLOADING_DATA_TO_OSM": "Envoi des modifications vers OpenStreetMap…",
         "DONT_CLOSE": "Veuillez ne pas fermer cette page",
@@ -189,7 +204,15 @@
             "LEGACY_JOURNAL": "Cet ancien journal de récupération ne peut pas être réconcilié automatiquement.",
             "INTEGRITY": "L’instantané d’envoi enregistré a échoué au contrôle d’intégrité.",
             "LOCAL_CHANGE": "Les modifications locales n’ont pas pu être mises à jour.",
-            "UNKNOWN": "OpenStreetMap n’a pas pu traiter la requête."
+            "UNKNOWN": "OpenStreetMap n’a pas pu traiter la requête.",
+            "COMMENT_TOO_LONG": "Le commentaire du changeset dépasse 255 caractères. Raccourcissez-le puis réessayez.",
+            "FORBIDDEN": "OpenStreetMap n’autorise pas ce compte à modifier (permission manquante ou compte bloqué). Reconnectez-vous et vérifiez votre compte sur openstreetmap.org.",
+            "VERSION_CONFLICT": "Cet objet a été modifié sur OpenStreetMap depuis votre téléchargement.",
+            "NODE_STILL_REFERENCED": "Cet objet est encore utilisé par une ligne ou une relation. Il sera envoyé sans ses tags : relancez l’envoi.",
+            "UPLOAD_ELSEWHERE": "Un envoi est déjà en cours dans une autre fenêtre.",
+            "STALE_STATE": "Les données ont été modifiées dans une autre fenêtre. Rechargez l’application avant d’envoyer.",
+            "RECEIPT_NOT_SAVED": "OpenStreetMap a accepté les modifications mais le résultat n’a pas pu être enregistré sur cet appareil. Ne renvoyez pas : libérez de l’espace de stockage puis reprenez.",
+            "LOGIN_FAILED": "La connexion n’a pas pu être lancée."
         },
         "RECOVERY": {
             "ACTION": "Action recommandée",
@@ -205,9 +228,42 @@
                 "CREATE_CHANGESET": "Créer un nouveau changeset",
                 "INSPECT_SERVER": "Inspecter OpenStreetMap avant de continuer",
                 "RESUME_RECONCILIATION": "Reprendre la réconciliation locale",
-                "RETRY": "Réessayer l’opération"
+                "RETRY": "Réessayer l’opération",
+                "CHECK_ACCOUNT": "Reconnectez-vous et vérifiez que votre compte peut modifier",
+                "RELOAD": "Recharger l’application"
             }
-        }
+        },
+        "VERIFYING": "Vérification auprès d’OpenStreetMap…",
+        "VERIFY_AGAIN": "Vérifier à nouveau",
+        "VERIFICATION_NOT_FOUND": "Aucune trace de cet envoi dans le changeset.",
+        "VERIFICATION_UNAVAILABLE": "OpenStreetMap n’a pas pu être consulté. Vérifiez à nouveau une fois connecté, ou inspectez le changeset.",
+        "VERIFICATION_PARTIAL": "Le changeset ne contient qu’une partie de cet envoi. Un envoi est appliqué en entier : inspectez le changeset sur OpenStreetMap, puis exportez les données de récupération pour le considérer comme appliqué.",
+        "REBASE_CHANGE": "Réappliquer mes modifications sur la version actuelle",
+        "REBASE_DONE": "Vos modifications ont été réappliquées sur la version actuelle. Renvoyez-les.",
+        "REBASE_UP_TO_DATE": "Cet objet n’a pas changé sur OpenStreetMap depuis votre téléchargement. Renvoyez-le.",
+        "REBASE_GONE": "Cet objet a été supprimé sur OpenStreetMap. Annulez votre modification.",
+        "REBASE_FAILED": "La version actuelle n’a pas pu être récupérée. Réessayez.",
+        "REBASE_CONFLICT": "Vos modifications ne peuvent pas être réappliquées automatiquement :",
+        "REBASE_CONFLICT_TAGS": "tags modifiés des deux côtés ({{keys}})",
+        "REBASE_CONFLICT_POSITION": "l’objet a été déplacé différemment des deux côtés",
+        "REBASE_CONFLICT_STRUCTURE": "ses nœuds ou ses membres ont changé sur OpenStreetMap",
+        "MARK_APPLIED": "Considérer comme appliqué et retirer de la file",
+        "MARK_APPLIED_HINT": "Exportez d’abord les données de récupération.",
+        "MARK_APPLIED_CONFIRM_HEADER": "Retirer cet envoi de la file ?",
+        "MARK_APPLIED_CONFIRM_MESSAGE": "Continuez uniquement si OpenStreetMap contient déjà ces modifications. Elles quittent la file locale et une copie reste dans les données de récupération exportées. Retéléchargez ensuite la zone.",
+        "ATTEMPT_ABANDONED": "L’envoi a été retiré de la file.",
+        "STALE_WINDOW": "Les données ont été modifiées dans une autre fenêtre. Rechargez l’application pour continuer.",
+        "RELOAD": "Recharger",
+        "QUARANTINE_MESSAGE": "{{count}} objets locaux étaient illisibles et ont été mis de côté. Exportez-les pour garder une copie de ce qui n’a pas pu être récupéré.",
+        "QUARANTINE_EXPORT": "Exporter",
+        "QUARANTINE_DISMISS": "Ignorer",
+        "QUARANTINE_DISMISS_CONFIRM_HEADER": "Ignorer ces objets ?",
+        "QUARANTINE_DISMISS_CONFIRM_MESSAGE": "Les objets illisibles seront supprimés de cet appareil. Continuez uniquement si vous les avez exportés.",
+        "EXPORT_FAILED": "Le fichier n’a pas pu être exporté.",
+        "DELETE_CONFIRM_MESSAGE_ONE": "La modification de cet objet sera définitivement perdue. Cette action est irréversible.",
+        "VERIFICATION_WAIT": "OpenStreetMap peut encore appliquer une requête lente : vérifiez à nouveau dans {{seconds}} s avant de pouvoir la marquer comme non appliquée.",
+        "VERIFICATION_CHECK_NOW": "Vérifiez à nouveau pour confirmer que cet envoi n’a pas été appliqué.",
+        "STATE_BACKUP_MESSAGE": "Des données locales ont été mises de côté par une réinitialisation ou un changement de serveur. Exportez-les pour garder les modifications qu’elles contiennent."
     },
     "SETTINGS": {
         "SETTINGS": "Paramètres",
@@ -216,16 +272,11 @@
         "POSITION_TRACKING_HINT": "La carte est centrée sur votre position",
         "ORIENTATION_TRACKING": "Suivi de l'orientation",
         "ORIENTATION_TRACKING_HINT": "L'orientation de la carte dépend de celle de votre appareil",
-        "HIDE_LARGE_POLYGON": "Cacher les surface de plus de 5000 m²",
+        "HIDE_LARGE_POLYGON": "Cacher les surfaces de plus de 5000 m²",
         "HIDE_LARGE_POLYGON_HINT": "Les surfaces de plus de 5000 m² ne seront pas affichées. Un marqueur symbolisera toujours le polygone",
         "HIDE_LONG_LINE": "Cacher les lignes de plus de 200 m ",
         "HIDE_LONG_LINE_HINT": "Les lignes de plus de 200 m ne seront pas affichées. Un marqueur symbolisera toujours la ligne.",
         "TAGS": "Tags",
-        "DEFAULT_TAGS_LIST": "Liste des tags par défaut",
-        "TAGS_LIST_ALL": "Tous les tags",
-        "TAGS_LIST_BOOKMARKS": "Favoris",
-        "TAGS_LIST_TYPE": "Par type",
-        "DEFAULT_TAGS_LIST_HINT": "Type de tag par défaut à l'ouverture de la fenêtre de sélection",
         "DATA": "Données",
         "MARGIN": "Marge",
         "MARGIN_HINT": "Distance autour de la vue courante où les données seront téléchargées",
@@ -237,8 +288,6 @@
         "TAG_COUNTRY": "Pays",
         "TAG_COUNTRY_HINT": "Les tags et les presets peuvent varier selon les pays",
         "CACHE": "Gestion du cache",
-        "GENERATE_ICON_CACHE": "Générer le cache des icônes",
-        "DELETE_ICON_CACHE": "Supprimer le cache des icônes",
         "DELETE_CACHE": "Supprimer tout le cache de l'application",
         "DELETE_CACHE_HINT": "Supprime l'intégralité du cache : données, modifications, icônes, identifiants, etc.",
         "DISPLAY_OLD_TAGS_ICON": "Afficher une icône sur les anciens objets",
@@ -246,10 +295,10 @@
         "OLD_TAGS_ICON_RANGE_PART_2": "ans",
         "OLD_TAGS_ICON_HINT": "Si l'objet est plus vieux, affiche sur la carte une petite icône à gauche du marqueur",
         "DISPLAY_FIXME_ICON": "Afficher une icône \"fixme\"",
-        "DISPLAY_FIXME_ICON_HINT": "Affiche une icône à droite du marker pour indiquer la présence d'un tag fixme",
-        "ADD_SURVEY_DATE": "Ajouter le tag 'survey:date'",
-        "ADD_SURVEY_DATE_HINT": "Ajouter le tag 'survey:date' ou 'check:date' à la date du jour pour chaque création/modification d'un objet",
-        "CHECKED_KEY": "survey:date ou check_date ?",
+        "DISPLAY_FIXME_ICON_HINT": "Affiche une icône à droite du marqueur pour indiquer la présence d'un tag fixme",
+        "ADD_SURVEY_DATE": "Ajouter la date de vérification",
+        "ADD_SURVEY_DATE_HINT": "Met le tag de date de vérification choisi à la date du jour à chaque création ou modification d’un objet.",
+        "CHECKED_KEY": "Tag de la date de vérification",
         "LINES_SELECTABLE": "Rendre les lignes sélectionnables",
         "LINES_SELECTABLE_HINT": "Possibilité de cliquer sur une ligne pour ouvrir la fiche de l'élément",
         "POLYGONS_SELECTABLE": "Rendre les polygones sélectionnables",
@@ -264,29 +313,34 @@
         "LIMIT_FEATURES": "Nombre maximum d'objets en mémoire",
         "LIMIT_FEATURES_HINT": "Après cette limite, les anciennes données seront supprimées (Les modifications en cours seront conservées). Une limite trop haute peut diminuer considérablement les performances",
         "DISPLAY_SURVEY_CARD": "Afficher la survey card",
-        "DISPLAY_SURVEY_CARD_HINT": "Pour pouvoir ajouter le tag 'survey:date' facilement",
+        "DISPLAY_SURVEY_CARD_HINT": "Pour enregistrer facilement la date de vérification d’un objet.",
         "DISPLAY_SURVEY_CARD_CHOICE": {
             "ALWAYS": "Toujours",
             "OLDER": "Plus ancien que...",
             "NEVER": "Jamais"
         },
-        "SURVEY_CARD_RANGE": "Afficher quand la dernière MAJ date de plus de {{year}} ans"
+        "SURVEY_CARD_RANGE": "Afficher quand la dernière MAJ date de plus de {{year}} ans",
+        "UPLOAD_IN_PROGRESS": "Un envoi est en cours. Attendez qu’il se termine, puis réessayez.",
+        "DELETE_CACHE_CONFIRM_TITLE": "Supprimer tout le cache ?",
+        "DELETE_CACHE_CONFIRM_MESSAGE": "Les données téléchargées, les préférences, la connexion et les champs mémorisés seront supprimés. Cette action est irréversible.",
+        "DELETE_CACHE_PENDING_ONE": "1 modification non envoyée à OpenStreetMap sera perdue.",
+        "DELETE_CACHE_PENDING_MANY": "{{count}} modifications non envoyées à OpenStreetMap seront perdues.",
+        "DELETE_CACHE_UNRESOLVED_UPLOAD": "Un envoi précédent n’est pas encore réconcilié. Supprimer le cache efface son journal de récupération et peut créer des doublons sur OpenStreetMap.",
+        "DELETE_CACHE_CONFIRM": "Tout supprimer",
+        "DEVELOPER_MODE": "Mode développeur",
+        "DEV_SERVER": "Utiliser le serveur de développement OSM",
+        "DEV_SERVER_HINT": "Après ce changement, l’application redémarrera et les données seront effacées.",
+        "SWITCH_SERVER_MESSAGE_CLEAN": "Changer de serveur vous déconnecte, efface les données téléchargées et redémarre l’application.",
+        "AERIAL_IMAGERY_ERROR": "Impossible de charger les fonds aériens. Vérifiez votre connexion puis réessayez.",
+        "SWITCH_SERVER_UNRESOLVED_UPLOAD": "Un envoi précédent n’est pas encore réconcilié. Changer de serveur efface son journal de récupération et peut créer des doublons sur OpenStreetMap.",
+        "SWITCH_SERVER_FAILED": "Vos données n’ont pas pu être sauvegardées : le serveur n’a pas été changé."
     },
     "MODAL_SELECTED_ITEM": {
         "CUSTOM_KEY_VALUE": "Ajouter une valeur qui n'existe pas",
         "CUSTOM_TAG_INVALID": "La clé et la valeur personnalisées doivent contenir entre 1 et 255 caractères valides.",
         "CUSTOM_TAG_COLLISION": "Ce tag personnalisé entre en conflit avec une catégorie existante.",
-        "PRIMARY_TAG_LIST": "Liste",
-        "PRIMARY_TAG_CUSTOM": "Personnalisé",
         "SEARCH_TAG_AT_LEAST_3_LETTERS": "Veuillez entrer au moins 3 lettres dans la barre de recherche",
         "LOADING": "Chargement…",
-        "META_VERSION": "Version :",
-        "META_BEING_CREATED": "En cours de création",
-        "META_CREATED_AT_DATE": "Créé le :",
-        "META_UPDATED_AT_DATE": "Modifié le :",
-        "META_CREATED_AT_DATE_TIME_AGO": "Créé",
-        "META_UPDATED_AT_DATE_TIME_AGO": "Modifié",
-        "META_BY": "Par :",
         "META_MYSELF": "Moi-même",
         "NO_NAME": "Sans nom",
         "PLACEHOLDER_NAME": "Nom",
@@ -295,23 +349,30 @@
         "ADD_A_TAG": "Ajouter un tag",
         "DELETE_CONFIRM_HEADER": "Vraiment ?",
         "DELETE_CONFIRM_MESSAGE": "Supprimer cet élément?",
-        "ADD_SURVEY_DATE_CONFIRM_HEADER": "Objet vérifié ?",
-        "ADD_SURVEY_DATE_CONFIRM_MESSAGE": "Ajouter le tag 'survey:date' à la date du jour",
-        "PRIMARY_TAG_BOOKMARKS": "Favoris",
-        "PRIMARY_TAG_FULL": "Tous les tags",
         "SELECT_CATEGORY": "Sélectionner une catégorie",
         "THIS_NODE_IS_USED_BY_A_WAY": "Ce nœud est utilisé par {x} chemin(s)",
         "UNDEFINED_VALUE": "NC",
         "LAST_TAG_USED": "Derniers tags utilisés",
         "BOOKMARKS": "Favoris",
-        "LAST_SURVEY": "Dernière visite",
-        "WARN_NODE_EDITED": "Cet objet à été modifié localement",
+        "WARN_NODE_EDITED": "Cet objet a été modifié localement",
         "ADD_TAG_PLACEHOLDER": "Entrer une clé ou un nom",
-        "SURVEY_QUESTION": "Cet objet existe toujours ?"
+        "SURVEY_QUESTION": "Cet objet existe toujours ?",
+        "VALUE_LIMIT": "Limite de {{max}} caractères atteinte.",
+        "VALUE_TOO_LONG": "« {{key}} » dépasse {{max}} caractères. Raccourcissez-le avant d’enregistrer.",
+        "VALUE_INVALID": "« {{key}} » contient un caractère refusé par OpenStreetMap.",
+        "FIELDS_REMEMBERED": "Champs mémorisés pour « {{category}} ».",
+        "UPLOAD_LOCKED": "Cet objet fait partie d’un envoi non résolu. Terminez d’abord l’envoi.",
+        "CUSTOM_VALUE_HINT": "À utiliser uniquement pour une valeur qui existe vraiment dans OpenStreetMap mais qui manque dans la liste.",
+        "SURVEY_NO_NODE_ONLY": "« Non » n’est disponible que pour les points : seul un point peut être supprimé ici.",
+        "SHOW_ALL_OPTIONS": "Afficher les {{count}} options",
+        "SHOW_FEWER_OPTIONS": "Afficher moins d’options",
+        "REMOVE_VALUE": "Retirer « {{value}} »",
+        "ADD_VALUE": "Ajouter une valeur",
+        "ADD_VALUE_TO": "Ajouter une valeur à « {{field}} »"
     },
     "ALERT": {
         "TAG_IS_DEPRECATED": "Ce tag est déprécié",
-        "FIX": "Fix"
+        "FIX": "Corriger"
     },
     "MANAGE_TAGS": {
         "TAG_MANAGEMENT_TITLE": "Gestion des tags",
@@ -323,7 +384,8 @@
         "BOOKMARKED_TAGS": "Gérer vos favoris",
         "BOOKMARKED_TAGS_DESCRIPTION": "Cette fenêtre vous permet de gérer vos tags favoris",
         "RESET_HIDDEN_TAGS": "Réinitialiser",
-        "REMOVE_ALL_HIDDEN_TAGS": "Tout retirer"
+        "REMOVE_ALL_HIDDEN_TAGS": "Tout retirer",
+        "OPEN": "Ouvrir"
     },
     "DAYS": {
         "MONDAY": "Lundi",
@@ -349,6 +411,13 @@
         "SAVE_OPENING_HOURS": "Enregistrer les horaires",
         "DELETE_INTERVAL": "Supprimer cet intervalle",
         "SELECT_AT_LEAST_ONE_DAY": "Veuillez sélectionner au moins un jour",
-        "TOO_COMPLEX_FOR_OSMGO": "Le format est trop complexe pour Osm Go!"
+        "TOO_COMPLEX_FOR_OSMGO": "Le format est trop complexe pour Osm Go!",
+        "NEXT_DAY": "Se termine le lendemain",
+        "ERRORS": {
+            "INVALID_TIME": "Saisissez une heure de début et de fin valides.",
+            "SAME_TIME": "Les heures de début et de fin doivent être différentes.",
+            "OVERLAP": "Cette plage chevauche une autre plage.",
+            "NO_RANGE": "Ajoutez au moins une plage horaire."
+        }
     }
 }

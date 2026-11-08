@@ -5,7 +5,6 @@
         "CANCEL": "Zrušit",
         "CONFIRM": "Potvrdit",
         "ADD": "Přidat",
-        "VALIDATE": "Ověřit",
         "OK": "Ok",
         "UNKNOWN": "Neznámý",
         "UNDEFINED": "Nedefinovaný",
@@ -19,8 +18,7 @@
         "EXIT_CONFIRM_MESSAGE": "Opravdu chcete opustit Osm Go! ?",
         "START_SNACK_ITEMS_IN_MEMORY": "položek v paměti",
         "WHAT_ITEM": "Který?",
-        "LOAD_BBOX": "Načíst data?",
-        "CREATING_MISSING_ICONS": "Vytvářím chybějící ikony..."
+        "LOAD_BBOX": "Načíst data?"
     },
     "MENU": {
         "CONNECTION": "Přihlášení k OpenStreetMap",
@@ -36,18 +34,11 @@
     },
     "ABOUT": {
         "ABOUT": "O aplikaci",
-        "SOURCES": "Zdroje",
         "DATA": "Data"
     },
     "LOGIN": {
         "LOGIN": "Login",
-        "USERNAME_PLACEHOLDER": "Email nebo uživatelské jméno Openstreetmap",
-        "PASSWORD_PLACEHOLDER": "Heslo",
-        "LOGIN_BUTTON": "Přihlásit",
-        "LOGIN_OAUTH": "Přihlásit s Oauth",
-        "SAVE_PASSWORD": "Uložit heslo",
-        "SAVED_PASSWORD_HINT": "Heslo bude uloženo v čitelné podobě v mezipaměti aplikace",
-        "NOT_SAVED_PASSWORD_HINT": "Před každým nahráním na OSM budete vyzváni k zadání hesla"
+        "LOGIN_BUTTON": "Přihlásit"
     },
     "SEND_DATA": {
         "SEND_DATA": "Nahrát změny",
@@ -57,14 +48,12 @@
         "DELETED_ITEMS": "Smazané",
         "CHANGESET_COMMENT": "Komentář sady změn",
         "TYPE": "Typ",
-        "PRIMARY_KEY": "Hlavní tag",
         "NAME": "Název",
         "ERROR": "Chyba",
         "SEND": "Odeslat!",
         "DELETE": "Smazat",
         "DELETE_CONFIRM_HEADER": "Opravdu?",
-        "DELETE_CONFIRM_MESSAGE": "Vrátit všechny změny?",
-        "PASSWORD_OSM": "OSM heslo"
+        "DELETE_CONFIRM_MESSAGE": "Vrátit všechny změny?"
     },
     "SETTINGS": {
         "SETTINGS": "Nastavení",
@@ -91,22 +80,12 @@
     "MODAL_SELECTED_ITEM": {
         "CUSTOM_KEY_VALUE": "Přidat vlastní hodnotu",
         "SEARCH_TAG_AT_LEAST_3_LETTERS": "Do vyhledávacího pole zadejte alespoň 3 znaky",
-        "META_VERSION": "Verze:",
-        "META_BEING_CREATED": "Nový objekt",
-        "META_CREATED_AT_DATE": "Vytvořeno:",
-        "META_UPDATED_AT_DATE": "Upraveno:",
-        "META_CREATED_AT_DATE_TIME_AGO": "Vytvořeno",
-        "META_UPDATED_AT_DATE_TIME_AGO": "Upraveno",
-        "META_BY": "Uživatelem",
         "META_MYSELF": "vámi",
         "NO_NAME": "Bez názvu",
         "PLACEHOLDER_NAME": "Název",
         "ADD_A_TAG": "Přidat tag",
         "DELETE_CONFIRM_HEADER": "Opravdu?",
         "DELETE_CONFIRM_MESSAGE": "Smazat objekt?",
-        "ADD_SURVEY_DATE_CONFIRM_HEADER": "Je objekt aktuální?",
-        "ADD_SURVEY_DATE_CONFIRM_MESSAGE": "Přidá tag 'survey:date' s dnešním datem.",
-        "PRIMARY_TAG_BOOKMARKS": "Oblíbené",
         "THIS_NODE_IS_USED_BY_A_WAY": "Uzel je {x}x součástí cesty",
         "LAST_TAG_USED": "Nedávné",
         "BOOKMARKS": "Oblíbené"

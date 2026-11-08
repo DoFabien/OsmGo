@@ -5,7 +5,6 @@
         "CANCEL": "Cancel",
         "CONFIRM": "Confirm",
         "ADD": "Add",
-        "VALIDATE": "Validate",
         "OK": "OK",
         "UNKNOWN": "Unknown",
         "UNDEFINED": "Undefined",
@@ -19,7 +18,10 @@
         "SAVE": "Save",
         "DELETE": "Delete",
         "CLEAR": "Clear",
-        "ERROR": "Something went wrong. Your changes have been preserved."
+        "ERROR": "Something went wrong. Your changes have been preserved.",
+        "NO_RESULTS": "No results",
+        "RETRY": "Try again",
+        "CLEAR_FIELD": "Clear “{{field}}”"
     },
     "A11Y": {
         "ADD_BOOKMARK": "Add bookmark",
@@ -27,16 +29,14 @@
         "CENTER_FEATURE": "Center feature on map",
         "CHANGE_SUMMARY": "Change summary",
         "CODE": "Show or hide tag codes",
-        "COPY_FIELDS": "Remember these attributes",
+        "COPY_FIELDS": "Remember these fields",
         "HIDE_TAG": "Hide this tag",
         "LOCATION": "Location",
         "MAIN_NAVIGATION": "Main navigation",
         "OBJECT_FIELDS": "Object fields",
-        "OBJECT_INFORMATION": "Object information",
         "OPEN_LINK": "Open link",
         "OSM_ACCOUNT": "OpenStreetMap account",
-        "OSM_METADATA": "OpenStreetMap metadata",
-        "PASTE_FIELDS": "Reuse last attributes · {{category}}",
+        "PASTE_FIELDS": "Reuse last fields · {{category}}",
         "REMOVE_BOOKMARK": "Remove bookmark",
         "REMOVE_TAG": "Remove this tag",
         "SELECTED": "Selected",
@@ -50,13 +50,14 @@
         "WHAT_ITEM": "Which?",
         "SELECT_ITEM_AT_LOCATION": "Select the object at this location.",
         "LOAD_BBOX": "Load data?",
-        "CREATING_MISSING_ICONS": "Creating missing icons…",
         "STARTUP": {
             "TITLE": "Osm Go! could not start",
             "REQUIRED_RESOURCE_FAILED": "A required application resource could not be loaded. Check your connection, then try again.",
-            "CORRUPTED_STORAGE": "The local map data is unreadable. Retry first, or reset it if the problem persists. Resetting removes downloaded data and pending edits.",
+            "CORRUPTED_STORAGE": "The local map data is unreadable. Retry first, or reset it if the problem persists. Resetting clears the downloaded data and pending edits from the app and keeps a backup copy on this device when it can.",
             "RETRY": "Try again",
-            "RESET_LOCAL_DATA": "Reset local map data"
+            "RESET_LOCAL_DATA": "Reset local map data",
+            "QUARANTINE_NOTICE": "Some local objects were unreadable and were set aside ({{count}}). You can export them from the upload screen.",
+            "RESET_FAILED": "Your data could not be backed up: nothing was deleted."
         },
         "MAP_INITIALIZATION": {
             "TITLE": "The map could not start",
@@ -75,7 +76,8 @@
                 "LABEL": "Objects at this spot",
                 "PREVIOUS": "Previous object",
                 "NEXT": "Next object",
-                "LIST": "Show all objects at this spot"
+                "LIST": "Show all objects at this spot",
+                "POSITION": "{{index}} / {{count}}, show all objects at this spot"
             },
             "EXPAND_PANEL": "Expand object sheet",
             "REDUCE_PANEL": "Reduce object sheet",
@@ -95,8 +97,16 @@
             "FIELDS": {
                 "ARTIST": "Artist",
                 "MATERIAL": "Material",
-                "START_DATE": "Installation date"
-            }
+                "START_DATE": "Start date",
+                "OPTION_VALUE": "{{label}}: {{value}}",
+                "VALUE_NO": "no",
+                "VALUE_ONLY": "only"
+            },
+            "REVERT_LOCAL": "Discard my local changes",
+            "REVERT_LOCAL_TITLE": "Discard your local changes?",
+            "REVERT_LOCAL_MESSAGE": "This object will go back to the version last downloaded from OpenStreetMap.",
+            "REVERT_LOCAL_MESSAGE_CREATED": "This new object has not been uploaded yet and will be deleted.",
+            "REVERT_LOCAL_MESSAGE_DELETED": "The object will no longer be marked for deletion."
         },
         "BUTTONS": {
             "MENU": "Menu",
@@ -109,8 +119,21 @@
             "ADD_NEW": "Create an object",
             "CENTER_GPS": "Center the map on my location",
             "CONFIRM_ADD": "Add an object",
-            "CONFIRM_MOVE": "Move an object"
-        }
+            "CONFIRM_MOVE": "Move an object",
+            "REFRESH_ZOOM_HINT": "Zoom in to download data"
+        },
+        "LOCATION": {
+            "DENIED": "Location access is blocked. Allow it in your device settings to see your position.",
+            "UNAVAILABLE": "Your position is not available right now. Check that location is turned on.",
+            "SEARCHING": "Looking for your position…"
+        },
+        "SW": {
+            "INSTALLATION_FAILED": "The new version could not be installed.",
+            "UNRECOVERABLE": "The app needs to reload to keep working.",
+            "RELOAD": "Reload",
+            "EXTERNAL_STATE": "The data was changed in another tab. Reload to continue."
+        },
+        "LINKED_OBJECT_NOT_FOUND": "The linked object was not found in the downloaded data."
     },
     "MENU": {
         "CONNECTION": "Log in at OpenStreetMap",
@@ -123,24 +146,18 @@
         "EXIT": "Exit",
         "NEW_VERSION": "New version available!",
         "INSTALL_UPDATE": "Install the latest version",
-        "TAG_MANAGEMENT": "Tag management"
+        "TAG_MANAGEMENT": "Tag management",
+        "LOGIN_ERROR": "Could not start the OpenStreetMap login. Check your connection and try again."
     },
     "ABOUT": {
         "ABOUT": "About",
-        "SOURCES": "Sources",
         "DATA": "Data",
         "VERSION": "Version",
         "OSM_CONTRIBUTORS": "© OpenStreetMap contributors"
     },
     "LOGIN": {
         "LOGIN": "Login",
-        "USERNAME_PLACEHOLDER": "OpenStreetMap e-mail or username",
-        "PASSWORD_PLACEHOLDER": "Password",
-        "LOGIN_BUTTON": "Log in",
-        "LOGIN_OAUTH": "Log in with OAuth",
-        "SAVE_PASSWORD": "Save your password",
-        "SAVED_PASSWORD_HINT": "Your password will be saved in clear-text in the app cache.",
-        "NOT_SAVED_PASSWORD_HINT": "You will be asked for your password before each OSM update."
+        "LOGIN_BUTTON": "Log in"
     },
     "SEND_DATA": {
         "SEND_DATA": "Upload data",
@@ -152,7 +169,6 @@
         "TOTAL_ITEMS": "Total",
         "CHANGESET_COMMENT": "Changeset comment",
         "TYPE": "Type",
-        "PRIMARY_KEY": "Primary key",
         "NAME": "Name",
         "ERROR": "Error",
         "SEND": "Upload!",
@@ -160,8 +176,7 @@
         "SEND_CHANGES": "Upload {{count}} changes",
         "DELETE": "Delete",
         "DELETE_CONFIRM_HEADER": "Are you sure?",
-        "DELETE_CONFIRM_MESSAGE": "Delete all changes?",
-        "PASSWORD_OSM": "OSM password",
+        "DELETE_CONFIRM_MESSAGE": "The changes to {{count}} objects will be permanently lost. This cannot be undone.",
         "CANCEL_THIS_CHANGE": "Cancel this change",
         "UPLOADING_DATA_TO_OSM": "Uploading changes to OpenStreetMap...",
         "DONT_CLOSE": "Please do not close this page",
@@ -189,7 +204,15 @@
             "LEGACY_JOURNAL": "This older recovery journal cannot be reconciled automatically.",
             "INTEGRITY": "The saved upload snapshot failed its integrity check.",
             "LOCAL_CHANGE": "The local changes could not be updated.",
-            "UNKNOWN": "OpenStreetMap could not process the request."
+            "UNKNOWN": "OpenStreetMap could not process the request.",
+            "COMMENT_TOO_LONG": "The changeset comment is longer than 255 characters. Shorten it and try again.",
+            "FORBIDDEN": "OpenStreetMap does not allow this account to edit (missing permission or blocked account). Sign in again and check your account on openstreetmap.org.",
+            "VERSION_CONFLICT": "This object was modified on OpenStreetMap since you downloaded it.",
+            "NODE_STILL_REFERENCED": "This object is still used by a line or a relation. It will be sent without its tags: retry the upload.",
+            "UPLOAD_ELSEWHERE": "An upload is already running in another window.",
+            "STALE_STATE": "The data was changed in another window. Reload the application before uploading.",
+            "RECEIPT_NOT_SAVED": "OpenStreetMap accepted the changes but the result could not be saved on this device. Do not send again: free some storage, then resume.",
+            "LOGIN_FAILED": "The sign-in could not be started."
         },
         "RECOVERY": {
             "ACTION": "Recommended action",
@@ -205,9 +228,42 @@
                 "CREATE_CHANGESET": "Create a new changeset",
                 "INSPECT_SERVER": "Inspect OpenStreetMap before continuing",
                 "RESUME_RECONCILIATION": "Resume local reconciliation",
-                "RETRY": "Retry the operation"
+                "RETRY": "Retry the operation",
+                "CHECK_ACCOUNT": "Sign in again and check that your account can edit",
+                "RELOAD": "Reload the application"
             }
-        }
+        },
+        "VERIFYING": "Checking with OpenStreetMap...",
+        "VERIFY_AGAIN": "Check again",
+        "VERIFICATION_NOT_FOUND": "No trace of this upload was found in the changeset.",
+        "VERIFICATION_UNAVAILABLE": "OpenStreetMap could not be checked. Check again once online, or inspect the changeset.",
+        "VERIFICATION_PARTIAL": "The changeset only contains part of this upload. An upload is applied as a whole: inspect the changeset on OpenStreetMap, then export the recovery data to consider it applied.",
+        "REBASE_CHANGE": "Reapply my changes on the current version",
+        "REBASE_DONE": "Your changes were reapplied on the current version. Upload again.",
+        "REBASE_UP_TO_DATE": "This object has not changed on OpenStreetMap since your download. Upload again.",
+        "REBASE_GONE": "This object was deleted on OpenStreetMap. Cancel your change.",
+        "REBASE_FAILED": "The current version could not be fetched. Try again.",
+        "REBASE_CONFLICT": "Your changes cannot be reapplied automatically:",
+        "REBASE_CONFLICT_TAGS": "tags changed on both sides ({{keys}})",
+        "REBASE_CONFLICT_POSITION": "the object was moved differently on both sides",
+        "REBASE_CONFLICT_STRUCTURE": "its nodes or members changed on OpenStreetMap",
+        "MARK_APPLIED": "Consider as applied and remove from the queue",
+        "MARK_APPLIED_HINT": "Export the recovery data first.",
+        "MARK_APPLIED_CONFIRM_HEADER": "Remove this upload from the queue?",
+        "MARK_APPLIED_CONFIRM_MESSAGE": "Only continue if OpenStreetMap already holds these changes. They leave the local queue and a copy stays in the exported recovery data. Download the area again afterwards.",
+        "ATTEMPT_ABANDONED": "The upload was removed from the queue.",
+        "STALE_WINDOW": "The data was changed in another window. Reload the application to keep working.",
+        "RELOAD": "Reload",
+        "QUARANTINE_MESSAGE": "{{count}} local objects were unreadable and set aside. Export them to keep a copy of what could not be recovered.",
+        "QUARANTINE_EXPORT": "Export",
+        "QUARANTINE_DISMISS": "Dismiss",
+        "QUARANTINE_DISMISS_CONFIRM_HEADER": "Dismiss these objects?",
+        "QUARANTINE_DISMISS_CONFIRM_MESSAGE": "The unreadable objects will be deleted from this device. Only continue if you exported them.",
+        "EXPORT_FAILED": "The file could not be exported.",
+        "DELETE_CONFIRM_MESSAGE_ONE": "The change to this object will be permanently lost. This cannot be undone.",
+        "VERIFICATION_WAIT": "OpenStreetMap may still apply a slow request: check again in {{seconds}} s before it can be marked as not applied.",
+        "VERIFICATION_CHECK_NOW": "Check again to confirm that this upload was not applied.",
+        "STATE_BACKUP_MESSAGE": "Local data was set aside by a reset or a change of server. Export it to keep a copy of the changes it contains."
     },
     "SETTINGS": {
         "SETTINGS": "Settings",
@@ -221,11 +277,6 @@
         "HIDE_LONG_LINE": "Hide lines longer than 200 m",
         "HIDE_LONG_LINE_HINT": "Lines longer than 200 m won't be displayed. A marker will always represent the line.",
         "TAGS": "Tags",
-        "DEFAULT_TAGS_LIST": "Default tags list",
-        "TAGS_LIST_ALL": "All tags",
-        "TAGS_LIST_BOOKMARKS": "Bookmarks",
-        "TAGS_LIST_TYPE": "By type",
-        "DEFAULT_TAGS_LIST_HINT": "Default tag type when opening the selection window",
         "DATA": "Data",
         "MARGIN": "Margin",
         "MARGIN_HINT": "Distance around the current view where the data will be downloaded.",
@@ -237,8 +288,6 @@
         "TAG_COUNTRY": "Country",
         "TAG_COUNTRY_HINT": "Tags and presets may vary by country.",
         "CACHE": "Cache management",
-        "GENERATE_ICON_CACHE": "Generate icon cache",
-        "DELETE_ICON_CACHE": "Delete icon cache",
         "DELETE_CACHE": "Delete entire app cache",
         "DELETE_CACHE_HINT": "Delete everything in the app cache: data, edits, login, etc.",
         "DISPLAY_OLD_TAGS_ICON": "Show an icon on old objects",
@@ -247,9 +296,9 @@
         "OLD_TAGS_ICON_HINT": "If the object is older, display a small icon to the left of the marker on the map.",
         "DISPLAY_FIXME_ICON": "Display \"fixme\" icons",
         "DISPLAY_FIXME_ICON_HINT": "Displays an icon to the right of the marker to indicate the presence of a fixme tag.",
-        "ADD_SURVEY_DATE": "Add today's date to tag 'survey:date'",
-        "ADD_SURVEY_DATE_HINT": "Add today's date to tag 'survey:date' or 'check_date' after adding or editing an object.",
-        "CHECKED_KEY": "'survey:date' or 'check_date'?",
+        "ADD_SURVEY_DATE": "Add the survey date",
+        "ADD_SURVEY_DATE_HINT": "Sets the chosen survey date tag to today’s date each time an object is added or edited.",
+        "CHECKED_KEY": "Survey date tag",
         "LINES_SELECTABLE": "Make lines selectable",
         "LINES_SELECTABLE_HINT": "Ability to click on a line to open the element sheet.",
         "POLYGONS_SELECTABLE": "Make polygons selectable",
@@ -264,29 +313,34 @@
         "LIMIT_FEATURES": "Maximum number of objects in memory",
         "LIMIT_FEATURES_HINT": "After this limit, the old data will be deleted (the current modifications will be kept). Too high a limit can dramatically decrease performance",
         "DISPLAY_SURVEY_CARD": "Show the survey card",
-        "DISPLAY_SURVEY_CARD_HINT": "Makes it easy to add the 'survey:date' tag.",
+        "DISPLAY_SURVEY_CARD_HINT": "Makes it easy to record the survey date of an object.",
         "DISPLAY_SURVEY_CARD_CHOICE": {
             "NEVER": "Never",
             "OLDER": "Older than...",
             "ALWAYS": "Always"
         },
-        "SURVEY_CARD_RANGE": "Show when the last update was more than {{year}} years ago"
+        "SURVEY_CARD_RANGE": "Show when the last update was more than {{year}} years ago",
+        "UPLOAD_IN_PROGRESS": "An upload is in progress. Wait for it to finish, then try again.",
+        "DELETE_CACHE_CONFIRM_TITLE": "Delete the entire cache?",
+        "DELETE_CACHE_CONFIRM_MESSAGE": "Downloaded data, preferences, login and remembered fields will be deleted. This cannot be undone.",
+        "DELETE_CACHE_PENDING_ONE": "1 change that has not been uploaded to OpenStreetMap will be lost.",
+        "DELETE_CACHE_PENDING_MANY": "{{count}} changes that have not been uploaded to OpenStreetMap will be lost.",
+        "DELETE_CACHE_UNRESOLVED_UPLOAD": "A previous upload is not fully reconciled yet. Deleting the cache erases its recovery record and may lead to duplicates on OpenStreetMap.",
+        "DELETE_CACHE_CONFIRM": "Delete everything",
+        "DEVELOPER_MODE": "Developer mode",
+        "DEV_SERVER": "Use the OSM development server",
+        "DEV_SERVER_HINT": "After this change, the application will restart and the data will be cleared.",
+        "SWITCH_SERVER_MESSAGE_CLEAN": "Changing server signs you out, clears the downloaded data and restarts the application.",
+        "AERIAL_IMAGERY_ERROR": "Aerial imagery could not be loaded. Check your connection and try again.",
+        "SWITCH_SERVER_UNRESOLVED_UPLOAD": "A previous upload is not fully reconciled yet. Changing server erases its recovery record and may lead to duplicates on OpenStreetMap.",
+        "SWITCH_SERVER_FAILED": "Your data could not be backed up, so the server was not changed."
     },
     "MODAL_SELECTED_ITEM": {
         "CUSTOM_KEY_VALUE": "Add a custom value",
         "CUSTOM_TAG_INVALID": "The custom tag key and value must contain 1 to 255 valid characters.",
         "CUSTOM_TAG_COLLISION": "This custom tag conflicts with an existing category.",
-        "PRIMARY_TAG_LIST": "List",
-        "PRIMARY_TAG_CUSTOM": "Custom",
         "SEARCH_TAG_AT_LEAST_3_LETTERS": "Please enter at least three characters in the search bar",
         "LOADING": "Loading…",
-        "META_VERSION": "Version:",
-        "META_BEING_CREATED": "Being created",
-        "META_CREATED_AT_DATE": "Added at:",
-        "META_UPDATED_AT_DATE": "Updated at:",
-        "META_CREATED_AT_DATE_TIME_AGO": "Added",
-        "META_UPDATED_AT_DATE_TIME_AGO": "Updated",
-        "META_BY": "By:",
         "META_MYSELF": "Myself",
         "NO_NAME": "No name",
         "PLACEHOLDER_NAME": "Name",
@@ -295,19 +349,26 @@
         "ADD_A_TAG": "Add a tag",
         "DELETE_CONFIRM_HEADER": "Are you sure?",
         "DELETE_CONFIRM_MESSAGE": "Delete this item?",
-        "ADD_SURVEY_DATE_CONFIRM_HEADER": "Has the object been verified?",
-        "ADD_SURVEY_DATE_CONFIRM_MESSAGE": "Add today's date to tag 'survey:date'.",
-        "PRIMARY_TAG_BOOKMARKS": "Bookmarks",
-        "PRIMARY_TAG_FULL": "Full",
         "SELECT_CATEGORY": "Select a category",
         "THIS_NODE_IS_USED_BY_A_WAY": "This node is used by {x} way(s)",
         "UNDEFINED_VALUE": "Unknown",
         "LAST_TAG_USED": "Last used tags",
         "BOOKMARKS": "Bookmarks",
         "ADD_TAG_PLACEHOLDER": "Enter a key or name",
-        "LAST_SURVEY": "Last survey",
         "SURVEY_QUESTION": "Does this object still exist?",
-        "WARN_NODE_EDITED": "This object has local changes"
+        "WARN_NODE_EDITED": "This object has local changes",
+        "VALUE_LIMIT": "Limit of {{max}} characters reached.",
+        "VALUE_TOO_LONG": "“{{key}}” is longer than {{max}} characters. Shorten it before saving.",
+        "VALUE_INVALID": "“{{key}}” contains a character that OpenStreetMap does not accept.",
+        "FIELDS_REMEMBERED": "Fields remembered for “{{category}}”.",
+        "UPLOAD_LOCKED": "This object belongs to an upload that is not resolved yet. Finish the upload first.",
+        "CUSTOM_VALUE_HINT": "Only use this for a value that really exists on OpenStreetMap but is missing from the list.",
+        "SURVEY_NO_NODE_ONLY": "“No” is only available for points, because only a point can be deleted from here.",
+        "SHOW_ALL_OPTIONS": "Show all {{count}} options",
+        "SHOW_FEWER_OPTIONS": "Show fewer options",
+        "REMOVE_VALUE": "Remove “{{value}}”",
+        "ADD_VALUE": "Add a value",
+        "ADD_VALUE_TO": "Add a value to “{{field}}”"
     },
     "ALERT": {
         "TAG_IS_DEPRECATED": "This tag is deprecated",
@@ -323,7 +384,8 @@
         "BOOKMARKED_TAGS": "Manage your favorites",
         "BOOKMARKED_TAGS_DESCRIPTION": "This window allows you to manage your favorite tags.",
         "RESET_HIDDEN_TAGS": "Reset",
-        "REMOVE_ALL_HIDDEN_TAGS": "Remove all"
+        "REMOVE_ALL_HIDDEN_TAGS": "Remove all",
+        "OPEN": "Open"
     },
     "DAYS": {
         "MONDAY": "Monday",
@@ -349,6 +411,13 @@
         "SAVE_OPENING_HOURS": "Save opening hours",
         "DELETE_INTERVAL": "Delete this interval",
         "SELECT_AT_LEAST_ONE_DAY": "You need to select at least one day",
-        "TOO_COMPLEX_FOR_OSMGO": "This format is too complex for Osm Go!"
+        "TOO_COMPLEX_FOR_OSMGO": "This format is too complex for Osm Go!",
+        "NEXT_DAY": "Ends the next day",
+        "ERRORS": {
+            "INVALID_TIME": "Enter a valid start and end time.",
+            "SAME_TIME": "The start and end times must be different.",
+            "OVERLAP": "This range overlaps another range.",
+            "NO_RANGE": "Add at least one time range."
+        }
     }
 }
