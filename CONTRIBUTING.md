@@ -19,10 +19,9 @@ Some preset translations come from [iD Tagging Schema](https://github.com/openst
 The maintained stack is:
 
 - Node.js 24.18.0 and npm 11.16.0;
-- Angular 22.1;
-- Ionic 8.8;
-- Capacitor 8.5;
-- MapLibre GL JS 6.1;
+- Angular 22.2 and Angular Material;
+- Capacitor 8.6;
+- MapLibre GL JS 6.17;
 - JDK 21 and Android SDK 36 for Android builds.
 
 Node is pinned in `.nvmrc`. Use npm and the committed `package-lock.json`; do not replace them with another package manager.
@@ -83,6 +82,10 @@ npm run update
 ```
 
 `presets:generate` updates tags, fields, translations, and brands. `update` also refreshes sprites and basemaps. Commit every generated file changed by these commands. CI runs the generator twice, checks determinism, and rejects uncommitted generated output.
+
+The vector background uses the OpenFreeMap tiles (OpenMapTiles schema, no API key). Its style, `src/assets/mapStyle/brigthCustom.json`, is generated from the OpenFreeMap "bright" style without points of interest, shields or remote fonts: download `https://tiles.openfreemap.org/styles/bright` and `https://tiles.openfreemap.org/planet`, then run `npm run basemap:style -- bright.json planet.json`. The second file becomes `src/assets/mapStyle/openfreemap-planet.json`, the TileJSON embedded in the app: the map uses the last TileJSON downloaded, or this copy, so the background opens offline.
+
+The interface icons come from a subset of the Material Symbols Rounded font (`src/theme/material-symbols/`). After adding a new icon name in a template or component, run `npm run icons:subset` and commit the regenerated font: `npm run test:scripts` fails when an icon used in the sources is missing from the subset.
 
 ## Git workflow
 

@@ -77,7 +77,21 @@ const osmMapFixture = JSON.stringify({
 })
 
 async function mockMapTiles(page: Page): Promise<void> {
-    await page.route(/https:\/\/[ab]\.tiles\.mapbox\.com\/.*/, (route) =>
+    await page.route('https://tiles.openfreemap.org/planet', (route) =>
+        route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                tilejson: '3.0.0',
+                tiles: [
+                    'https://tiles.openfreemap.org/planet/test/{z}/{x}/{y}.pbf',
+                ],
+                minzoom: 0,
+                maxzoom: 14,
+            }),
+        })
+    )
+    await page.route(/https:\/\/tiles\.openfreemap\.org\/planet\/.*/, (route) =>
         route.fulfill({
             status: 200,
             contentType: 'application/x-protobuf',

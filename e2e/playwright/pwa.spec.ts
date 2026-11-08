@@ -19,6 +19,14 @@ interface StoredOsmState {
     nextTemporaryId: number
 }
 
+interface StoredOsmStateHead {
+    pendingById: Record<string, StoredFeature>
+    official: {
+        slot: 'a' | 'b' | null
+        delta: Record<string, StoredFeature | null>
+    }
+}
+
 interface StoredFeature {
     id: string
     properties: {
@@ -95,7 +103,21 @@ const osmMapFixture = JSON.stringify({
 })
 
 async function mockExternalMapTiles(page: Page): Promise<void> {
-    await page.route(/https:\/\/[ab]\.tiles\.mapbox\.com\/.*/, (route) =>
+    await page.route('https://tiles.openfreemap.org/planet', (route) =>
+        route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                tilejson: '3.0.0',
+                tiles: [
+                    'https://tiles.openfreemap.org/planet/test/{z}/{x}/{y}.pbf',
+                ],
+                minzoom: 0,
+                maxzoom: 14,
+            }),
+        })
+    )
+    await page.route(/https:\/\/tiles\.openfreemap\.org\/planet\/.*/, (route) =>
         route.fulfill({
             status: 200,
             contentType: 'application/x-protobuf',
@@ -173,6 +195,27 @@ async function readStoredValue<T>(page: Page, key: string): Promise<T> {
         database.close()
         return value
     }, key)
+}
+
+async function readOfficialFeatures(
+    page: Page
+): Promise<Record<string, StoredFeature>> {
+    const head = await readStoredValue<StoredOsmStateHead | undefined>(
+        page,
+        'osmState'
+    )
+    if (!head) return {}
+    const slot = head.official.slot
+        ? await readStoredValue<
+              { officialById: Record<string, StoredFeature> } | undefined
+          >(page, `osmStateOfficial:${head.official.slot}`)
+        : undefined
+    const officialById = { ...(slot?.officialById ?? {}) }
+    for (const [id, feature] of Object.entries(head.official.delta)) {
+        if (feature === null) delete officialById[id]
+        else officialById[id] = feature
+    }
+    return officialById
 }
 
 async function writeStoredValues(
@@ -576,11 +619,8 @@ test('downloads a small OSM area from a fixture', async ({ page }) => {
 
     await expect
         .poll(async () => {
-            const osmState = await readStoredValue<StoredOsmState>(
-                page,
-                'osmState'
-            )
-            return Boolean(osmState?.officialById['node/1'])
+            const officialById = await readOfficialFeatures(page)
+            return Boolean(officialById['node/1'])
         })
         .toBe(true)
 })
@@ -698,13 +738,15 @@ test('creates, edits, and persists a POI locally', async ({ page }) => {
     await expect(lastBench).toHaveCount(1)
     await lastBench.locator('.tag-row__main').click()
     const restoreLastAttributes = page.getByRole('button', {
-        name: 'Reuse last attributes · Bench',
+        name: 'Reuse last fields · Bench',
         exact: true,
     })
     await expect(restoreLastAttributes).toBeVisible()
     await restoreLastAttributes.click()
     await page.getByRole('button', { name: 'Show or hide tag codes' }).click()
-    await expect(page.getByPlaceholder('material')).toHaveValue('wood')
+    await expect(page.getByLabel('material', { exact: true })).toHaveValue(
+        'wood'
+    )
 
     await page.goto('/?id=node/-1')
     await expect(page.getByTestId('edit-selected-poi')).toBeVisible()
@@ -751,7 +793,7 @@ test('uploads a pending change with fixture responses', async ({ page }) => {
 
     const osmState = await readStoredValue<StoredOsmState>(page, 'osmState')
     expect(Object.keys(osmState.pendingById)).toHaveLength(0)
-    expect(osmState.officialById['node/100']).toBeDefined()
+    expect((await readOfficialFeatures(page))['node/100']).toBeDefined()
 })
 
 test('keeps the queue when changeset creation fails', async ({ page }) => {
@@ -813,6 +855,11 @@ test('accepts a valid OAuth callback and rejects an invalid state', async ({
         .poll(() => readStoredValue(page, 'osmToken:prod'))
         .toBe('callback-token')
     await expect(page).not.toHaveURL(/code=|state=/)
+    expect(
+        await page.evaluate(() =>
+            sessionStorage.getItem('osmOAuthTransaction:prod')
+        )
+    ).toBeNull()
 
     await page.evaluate(() => {
         sessionStorage.setItem(
@@ -829,11 +876,12 @@ test('accepts a valid OAuth callback and rejects an invalid state', async ({
     await page.goto('/?code=fixture-code&state=wrong-state')
     await expect(page).not.toHaveURL(/code=|state=/)
     expect(tokenRequests).toBe(1)
+    // A stray callback must not destroy the sign-in still in progress.
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem('osmOAuthTransaction:prod')
         )
-    ).toBeNull()
+    ).not.toBeNull()
 })
 
 test('keeps the placement marker aligned at fixed map coordinates', async ({
@@ -900,7 +948,7 @@ test('cancels and confirms moving an existing POI', async ({ page }) => {
         'osmState'
     )
     expect(Object.keys(stateAfterCancel.pendingById)).toHaveLength(0)
-    const originalFeature = stateAfterCancel.officialById['node/1']
+    const originalFeature = (await readOfficialFeatures(page))['node/1']
     expect(originalFeature?.geometry.coordinates).toEqual([2.2945, 48.8584])
 
     await page.getByTestId('move-poi').click()
