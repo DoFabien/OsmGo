@@ -58,4 +58,16 @@ describe('TagListElementComponent', () => {
         expect(favoriteButton.classList.contains('is-bookmarked')).toBe(true)
         expect(favoriteIcon.textContent?.trim()).toBe('favorite')
     })
+
+    it('gives the selected indicator a role so that its label is announced', () => {
+        fixture.componentRef.setInput('oldTagConfig', tagsConfig.tags[0])
+        fixture.detectChanges()
+
+        const indicator = fixture.nativeElement.querySelector(
+            '.current-indicator'
+        ) as HTMLElement
+
+        expect(indicator.getAttribute('role')).toBe('img')
+        expect(indicator.getAttribute('aria-label')).toBe('A11Y.SELECTED')
+    })
 })

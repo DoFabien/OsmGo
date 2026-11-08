@@ -1,4 +1,4 @@
-@if (intervals && !displayCode() && !isError && !isTooComplex) {
+@if (!showRawField) {
     <section class="opening-hours">
         @if (editMode()) {
             <button
@@ -19,68 +19,64 @@
             </button>
         }
         @if (openingHours()) {
-            @for (dataRange of intervals; track dataRange) {
+            @for (
+                dataRange of intervals;
+                track dataRange;
+                let rangeIndex = $index
+            ) {
                 <div class="schedule" role="table">
-                    @for (day of days; track day.index) {
+                    @for (
+                        row of scheduleRows[rangeIndex];
+                        track row.day.index
+                    ) {
                         <div class="schedule-row" role="row">
-                            <strong role="rowheader">{{ day.text }}</strong>
-                            @if (
-                                findIntervalsByDay(
-                                    dataRange._typical._intervals,
-                                    day.index
-                                );
-                                as dayIntervals
-                            ) {
-                                <div class="day-intervals" role="cell">
-                                    @for (
-                                        interval of dayIntervals;
-                                        track interval
-                                    ) {
-                                        <div class="interval">
-                                            <span>
-                                                {{
-                                                    interval._start
-                                                        | minutesToHoursMinutes
-                                                }}–{{
-                                                    interval._end
-                                                        | minutesToHoursMinutes
-                                                }}
-                                            </span>
-                                            @if (editMode()) {
-                                                <button
-                                                    mat-icon-button
-                                                    type="button"
-                                                    class="delete-interval"
-                                                    [attr.aria-label]="
-                                                        'OPENINGHOURS.DELETE_INTERVAL'
-                                                            | translate
-                                                    "
-                                                    (click)="
-                                                        deleteCurrentInterval(
-                                                            dataRange,
-                                                            interval
-                                                        )
-                                                    "
-                                                >
-                                                    <mat-icon
-                                                        fontSet="material-symbols-rounded"
-                                                    >
-                                                        close
-                                                    </mat-icon>
-                                                </button>
-                                            }
-                                        </div>
-                                    }
-                                    @if (dayIntervals.length === 0) {
-                                        <span class="closed">
+                            <strong role="rowheader">{{ row.day.text }}</strong>
+                            <div class="day-intervals" role="cell">
+                                @for (
+                                    interval of row.intervals;
+                                    track interval
+                                ) {
+                                    <div class="interval">
+                                        <span>
                                             {{
-                                                'OPENINGHOURS.CLOSED'
-                                                    | translate
+                                                interval._start
+                                                    | minutesToHoursMinutes
+                                            }}–{{
+                                                interval._end
+                                                    | minutesToHoursMinutes
                                             }}
                                         </span>
-                                    }
-                                </div>
-                            }
+                                        @if (editMode()) {
+                                            <button
+                                                mat-icon-button
+                                                type="button"
+                                                class="delete-interval"
+                                                [attr.aria-label]="
+                                                    'OPENINGHOURS.DELETE_INTERVAL'
+                                                        | translate
+                                                "
+                                                (click)="
+                                                    deleteCurrentInterval(
+                                                        dataRange,
+                                                        interval
+                                                    )
+                                                "
+                                            >
+                                                <mat-icon
+                                                    fontSet="material-symbols-rounded"
+                                                >
+                                                    close
+                                                </mat-icon>
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                                @if (row.intervals.length === 0) {
+                                    <span class="closed">
+                                        {{ 'OPENINGHOURS.CLOSED' | translate }}
+                                    </span>
+                                }
+                            </div>
                         </div>
                     }
                 </div>

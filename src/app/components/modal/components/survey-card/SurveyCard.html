@@ -25,4 +25,9 @@
             {{ 'SHARED.NO' | translate }}
         </button>
     </div>
+    @if (feature().properties.type !== 'node') {
+    <p class="survey-card__hint">
+        {{ 'MODAL_SELECTED_ITEM.SURVEY_NO_NODE_ONLY' | translate }}
+    </p>
+    }
 </section>

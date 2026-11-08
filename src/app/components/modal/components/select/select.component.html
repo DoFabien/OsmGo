@@ -1,14 +1,11 @@
-@if (preset().type === 'select') {
+@if (preset().type === 'select' || isMultiKeyPreset) {
     <article class="select-field">
         <strong>
-            @if (
-                !displayCode() &&
-                (preset().lbl[language()] || preset().lbl['en'])
-            ) {
-                {{ preset().lbl[language()] || preset().lbl['en'] }}
+            @if (!displayCode() && fieldLabel) {
+                {{ fieldLabel }}
             } @else {
                 <mat-icon fontSet="material-symbols-rounded">code</mat-icon
-                >{{ preset().key }}
+                >{{ codeLabel }}
             }
         </strong>
 
@@ -16,6 +13,7 @@
             @if (!displayCode()) {
                 <mat-form-field appearance="outline" subscriptSizing="dynamic">
                     <mat-select
+                        [aria-label]="fieldLabel"
                         [value]="selectedValue"
                         (selectionChange)="selectChange($event.value)"
                     >
@@ -30,8 +28,10 @@
                             }}</mat-option>
                         }
                         @if (
+                            !isMultiKeyPreset &&
                             (tag() | displayPresetLabel: preset()) ===
-                                undefined && tag().value !== ''
+                                undefined &&
+                            tag().value !== ''
                         ) {
                             <mat-option [value]="tag().value">{{
                                 tag().value
@@ -44,16 +44,21 @@
                     <input
                         matInput
                         type="text"
+                        maxlength="255"
+                        [attr.aria-label]="codeLabel"
+                        [disabled]="isMultiKeyPreset && !tag().key"
                         [ngModel]="tag().value"
                         (ngModelChange)="valueChange($event)"
-                        [placeholder]="tag().key"
                     />
                 </mat-form-field>
             }
             <button
                 mat-icon-button
                 type="button"
-                [attr.aria-label]="'SHARED.CLEAR' | translate"
+                [attr.aria-label]="
+                    'SHARED.CLEAR_FIELD'
+                        | translate: { field: fieldLabel || codeLabel }
+                "
                 (click)="valueChange('')"
             >
                 <mat-icon fontSet="material-symbols-rounded">close</mat-icon>

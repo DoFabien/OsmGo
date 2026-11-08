@@ -14,11 +14,19 @@
                 matInput
                 type="text"
                 [placeholder]="'MODAL_SELECTED_ITEM.PLACEHOLDER_NAME' | translate"
-                [(ngModel)]="findElement(tags, { key: 'name' }).value"
+                [attr.aria-label]="'MODAL_SELECTED_ITEM.PLACEHOLDER_NAME' | translate"
+                [attr.maxlength]="maxTagLength"
+                [(ngModel)]="nameTag().value"
                 autocomplete="off"
                 autocorrect="off"
-                autocapitalize="off"
+                autocapitalize="words"
             />
+            @if (nameTag().value.toString().length >= maxTagLength) {
+            <mat-hint
+                >{{ 'MODAL_SELECTED_ITEM.VALUE_LIMIT' | translate: { max:
+                maxTagLength } }}</mat-hint
+            >
+            }
         </mat-form-field>
         <button
             mat-icon-button
@@ -56,7 +64,7 @@
                 mat-stroked-button
                 type="button"
                 [attr.aria-label]="'A11Y.COPY_FIELDS' | translate"
-                (click)="rememberFields(tagConfig, tags)"
+                (click)="copyFields()"
             >
                 <mat-icon fontSet="material-symbols-rounded"
                     >content_copy</mat-icon
@@ -87,24 +95,26 @@
         >
             @for ( tag of tags | filterExcludeKeys : tagConfig :
             configService.config().countryTags : tagsService.primaryKeys() :
-            tagsService.presets() | orderByPreset: tagConfig; track tag.key ) {
-            @if (tag.preset || tagsService.presets()[tag.key.replace(':', '/')])
-            {
+            tagsService.presets() | orderByPreset: tagConfig; track
+            trackTag(tag) ) { @if (isShownInOwnRow(tag)) { @let preset =
+            presetOf(tag); @if (preset) {
             <edit-presets
-                [preset]="tag.preset || tagsService.presets()[tag.key.replace(':', '/')]"
+                [preset]="preset"
                 [displayCode]="displayCode"
                 [tag]="tag"
+                [tags]="tags"
                 [language]="configService.config().languageTags"
-                (openPrimaryListModal)="openModalList(tag, tag.preset || tagsService.presets()[tag.key.replace(':', '/')])"
+                (openPrimaryListModal)="openModalList(tag, preset)"
                 (addTags)="addPresetsTags($event)"
                 (tagChange)="applyTagSelection($event)"
+                (tagsPatch)="applyTagsPatch($event)"
             ></edit-presets>
             } @else {
             <edit-other-tag
                 [tag]="tag"
                 (deleteTag)="deleteTag($event)"
             ></edit-other-tag>
-            } }
+            } } }
         </section>
 
         <button
@@ -131,10 +141,10 @@
                 mat-button
                 type="button"
                 [disabled]="mapService.isProcessing()"
-                (click)="cancelChange()"
+                (click)="confirmCancelChange()"
             >
                 <mat-icon fontSet="material-symbols-rounded">undo</mat-icon>
-                {{ 'SHARED.CLEAR' | translate }}
+                {{ 'MAIN.SELECTION.REVERT_LOCAL' | translate }}
             </button>
         </div>
         }
@@ -177,7 +187,7 @@
                 }
             </div>
 
-            @if (mode === 'Update') {
+            @if (mode === 'Update') { @let changes = changedFieldCount();
             <button
                 mat-flat-button
                 data-testid="save-poi"
@@ -186,10 +196,7 @@
                 (click)="updateOsmElement(tagConfig)"
             >
                 <mat-icon fontSet="material-symbols-rounded">check</mat-icon>
-                @if (changedFieldCount() === 1) { {{
-                'MODAL_SELECTED_ITEM.SAVE_CHANGE' | translate }} } @else { {{
-                'MODAL_SELECTED_ITEM.SAVE_CHANGES' | translate: { count:
-                changedFieldCount() } }} }
+                {{ saveLabelKey(changes) | translate: { count: changes } }}
             </button>
             } @else if (mode === 'Create') {
             <button

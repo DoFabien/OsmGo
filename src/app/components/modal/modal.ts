@@ -1,5 +1,7 @@
 import {
     Component,
+    computed,
+    DestroyRef,
     effect,
     inject,
     input,
@@ -7,6 +9,7 @@ import {
     signal,
     untracked,
 } from '@angular/core'
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
 import { MatButtonModule } from '@angular/material/button'
 import { MatDialog } from '@angular/material/dialog'
@@ -18,8 +21,10 @@ import { MatSnackBar } from '@angular/material/snack-bar'
 import { MatToolbarModule } from '@angular/material/toolbar'
 import { MatTooltipModule } from '@angular/material/tooltip'
 import { cloneDeep } from '@app/utils/clone'
+import { resolveReplacementTags } from '@app/utils/deprecated-tags'
 import { isNodeUsedByWay } from '@app/utils/osm-feature'
 import {
+    MAX_OSM_TAG_LENGTH,
     normalizedOsmTagMap,
     normalizeEditorTags,
     normalizeOsmTagKey,
@@ -29,6 +34,7 @@ import {
 import { AlertComponent } from '@components/modal/components/alert/alert.component'
 import { EditOtherTag } from '@components/modal/components/edit/OtherTag.component'
 import { EditPresets } from '@components/modal/components/edit/Presets.component'
+import type { TagsPatch } from '@components/modal/components/multi-select/multi-select.component'
 import { PrimaryKey } from '@components/modal/components/primary-key/PrimaryKey'
 import type { TagSelectionChange } from '@components/modal/components/select/select.component'
 import {
@@ -51,14 +57,24 @@ import { IsBookmarkedPipe } from '@pipes/is-bookmarked.pipe'
 import { OrderByPresetPipe } from '@pipes/orderByPreset.pipe'
 import { getConfigTag } from '@scripts/osmToOsmgo/index.js'
 import { ConfigService } from '@services/config.service'
-import { DataService } from '@services/data.service'
+import { DataService, UploadQueueLockedError } from '@services/data.service'
 import { MapService } from '@services/map.service'
 import { OsmApiService } from '@services/osmApi.service'
 import { type SavedField, TagsService } from '@services/tags.service'
 import type { Geometry } from 'geojson'
 import { finalize, take } from 'rxjs/operators'
-import { ModalAddTag } from './modal.addTag/modal.addTag'
+import {
+    isCoveredByPreset,
+    isEditablePreset,
+    isEditableTagKey,
+    isMultiValuePreset,
+    isPrefixPreset,
+    type TagValueIssue,
+    tagValueIssue,
+} from './editor-tag'
+import { type AddTagSelection, ModalAddTag } from './modal.addTag/modal.addTag'
 import { ModalSelectList } from './modalSelectList/modalSelectList'
+import { PendingFieldEntries } from './pending-field-entries'
 
 export interface ModalDismissData {
     redraw?: boolean
@@ -85,6 +101,8 @@ interface DeprecatedTags {
 }
 
 type EditorMode = Extract<MapMode, 'Create' | 'Update'>
+
+const SURVEY_DATE_KEYS = ['survey:date', 'check_date']
 @Component({
     selector: 'app-object-editor-content',
     templateUrl: './modal.html',
@@ -107,6 +125,7 @@ type EditorMode = Extract<MapMode, 'Create' | 'Update'>
         PrimaryKey,
         TranslateModule,
     ],
+    providers: [PendingFieldEntries],
 })
 export class ObjectEditorContentComponent {
     readonly isNodeUsedByWay = isNodeUsedByWay
@@ -118,11 +137,27 @@ export class ObjectEditorContentComponent {
     private readonly translate = inject(TranslateService)
     private readonly dialog = inject(MatDialog)
     private readonly snackBar = inject(MatSnackBar)
+    private readonly destroyRef = inject(DestroyRef)
+    private readonly pendingEntries = inject(PendingFieldEntries)
 
     private readonly tagsState = signal<Tag[]>([])
     get tags(): Tag[] {
         return this.tagsState()
     }
+
+    private readonly emptyNameTag: Tag = { key: '', value: '' }
+    readonly nameTag = computed(
+        () =>
+            this.tagsState().find((tag) => tag.key === 'name') ??
+            this.emptyNameTag
+    )
+    readonly maxTagLength = MAX_OSM_TAG_LENGTH
+    /** Fields that write several tags (`payment:cash=yes`, `male=yes`…). */
+    private readonly multiValueFields = computed(() =>
+        this.tagsState().flatMap((tag) =>
+            tag.preset && isMultiValuePreset(tag.preset) ? [tag.preset] : []
+        )
+    )
 
     originalTags: Tag[] = []
     private readonly featureState = signal<OsmGoFeature | undefined>(undefined)
@@ -303,13 +338,10 @@ export class ObjectEditorContentComponent {
             typeGeomFeature === 'MultiLineString'
         ) {
             this.geometryType = 'line'
-        } else if (
-            typeGeomFeature === 'Polygon' ||
-            typeGeomFeature === 'MultiPolygon'
-        ) {
-            this.geometryType = 'area'
         } else {
-            throw new Error('The feature geometry is not supported.')
+            // Polygons, multipolygons and relations without a surface of their
+            // own (a stop_area is a GeometryCollection) share the area category.
+            this.geometryType = 'area'
         }
 
         this.modeState.set(inputs.mode)
@@ -328,7 +360,9 @@ export class ObjectEditorContentComponent {
                 key: tag,
                 value: this.feature.properties.tags[tag],
             }
-            if (preset) data.preset = preset
+            if (isEditablePreset(preset) && !isMultiValuePreset(preset)) {
+                data.preset = preset
+            }
             tags.push(data)
         }
 
@@ -383,7 +417,14 @@ export class ObjectEditorContentComponent {
         feature.properties.primaryTag = _primaryKey
         this.typeFicheState.set('Edit')
 
-        _tags = _tags.filter((tag) => tag.value !== '' && !tag.isDefaultValue)
+        // a field the user has just added stays until they fill or remove it
+        _tags = _tags.filter(
+            (tag) =>
+                !tag.isDefaultValue &&
+                (tag.value !== '' ||
+                    (tag.isJustAdded === true &&
+                        (tag.key !== '' || tag.preset !== undefined)))
+        )
         if (!_tags.find((tag) => tag.key === 'name')) {
             _tags.push({ key: 'name', value: '' })
         }
@@ -391,7 +432,7 @@ export class ObjectEditorContentComponent {
         if (!tagConfig) {
             _tagConfig = getConfigTag(feature, this.tagsService.tags())
         } else {
-            _tagConfig = tagConfig
+            _tagConfig = this.withInheritedFields(tagConfig, feature)
         }
 
         _tagId =
@@ -402,30 +443,64 @@ export class ObjectEditorContentComponent {
 
         _presetsIds = _tagConfig.presets ?? []
 
-        if (_presetsIds && _presetsIds.length > 0) {
-            for (let i = 0; i < _presetsIds.length; i++) {
-                const preset = this.tagsService.presets()[_presetsIds[i]]
-                if (!preset) continue
-                const presetKeys = preset.keys?.length
-                    ? preset.keys
-                    : preset.key
-                      ? [preset.key]
-                      : []
-
-                const tagOfPreset = _tags.find((tag) =>
-                    presetKeys.includes(tag.key)
+        const multiValueFields = this.multiValueFieldsOf(_tagConfig, _tags)
+        _tags = _tags.filter((tag) => {
+            const preset = tag.preset
+            if (!tag.isJustAdded || tag.value !== '' || !preset) return true
+            // the category shows this field already
+            return !(
+                _presetsIds.includes(preset._id) ||
+                multiValueFields.some((field) =>
+                    this.sameMultiValueField(field, preset)
                 )
-
-                if (tagOfPreset) {
-                    tagOfPreset.preset = preset
-                } else {
-                    _tags.push({
-                        key: preset.key || '',
-                        value: '',
-                        preset: preset,
-                    })
-                }
+            )
+        })
+        for (const tag of _tags) {
+            if (
+                multiValueFields.some((preset) =>
+                    isCoveredByPreset(preset, tag.key)
+                )
+            ) {
+                delete tag.preset
             }
+        }
+
+        for (const presetId of _presetsIds) {
+            const preset = this.tagsService.presets()[presetId]
+            if (!isEditablePreset(preset) || isMultiValuePreset(preset)) {
+                continue
+            }
+            // the multi-value field already edits this key (male, diet:vegan…)
+            if (
+                preset.key &&
+                multiValueFields.some((field) =>
+                    isCoveredByPreset(field, preset.key ?? '')
+                )
+            ) {
+                continue
+            }
+            const presetKeys = preset.keys?.length
+                ? preset.keys
+                : preset.key
+                  ? [preset.key]
+                  : []
+
+            const tagOfPreset = _tags.find((tag) =>
+                presetKeys.includes(tag.key)
+            )
+
+            if (tagOfPreset) {
+                tagOfPreset.preset = preset
+            } else {
+                _tags.push({
+                    key: preset.key || '',
+                    value: '',
+                    preset: preset,
+                })
+            }
+        }
+        for (const preset of multiValueFields) {
+            _tags.push({ key: '', value: '', preset })
         }
 
         this.tagIdState.set(_tagId)
@@ -440,9 +515,13 @@ export class ObjectEditorContentComponent {
         ) {
             this.tagsService
                 .loadBrandPresets$()
-                .pipe(take(1))
+                .pipe(take(1), takeUntilDestroyed(this.destroyRef))
                 .subscribe({
-                    next: () => this.initComponent(_tagConfig),
+                    next: () => {
+                        if (this.tagConfigState()?.id === _tagConfig.id) {
+                            this.initComponent(_tagConfig)
+                        }
+                    },
                     error: (error) =>
                         console.warn('Unable to load brand presets.', error),
                 })
@@ -450,16 +529,127 @@ export class ObjectEditorContentComponent {
         return { tagConfig: _tagConfig, tags: _tags, feature: feature }
     }
 
-    dataIsChanged(): boolean {
-        return !osmTagMapsEqual(
-            normalizedOsmTagMap(this.tags),
-            normalizedOsmTagMap(this.originalTags)
+    /**
+     * The fields of the category, then its optional fields already in use,
+     * that write several tags. One field per key prefix or set of keys.
+     */
+    private multiValueFieldsOf(tagConfig: TagConfig, tags: Tag[]): Preset[] {
+        const presets = this.tagsService.presets()
+        const listed = (tagConfig.presets ?? [])
+            .map((presetId) => presets[presetId])
+            .filter(isMultiValuePreset)
+        const used = (tagConfig.moreFields ?? [])
+            .map((presetId) => presets[presetId])
+            .filter(
+                (preset) =>
+                    isMultiValuePreset(preset) &&
+                    tags.some(
+                        (tag) =>
+                            tag.value !== '' &&
+                            isCoveredByPreset(preset, tag.key)
+                    )
+            )
+        const fields: Preset[] = []
+        for (const preset of [...listed, ...used]) {
+            if (
+                !fields.some((field) => this.sameMultiValueField(field, preset))
+            ) {
+                fields.push(preset)
+            }
+        }
+        return fields
+    }
+
+    private sameMultiValueField(field: Preset, preset: Preset): boolean {
+        if (field._id === preset._id) return true
+        if (isPrefixPreset(preset)) {
+            return isPrefixPreset(field) && field.key === preset.key
+        }
+        return (preset.keys ?? []).every((key) => isCoveredByPreset(field, key))
+    }
+
+    /** A category picked in the list comes without the fields of its parents. */
+    private withInheritedFields(
+        tagConfig: TagConfig,
+        feature: OsmGoFeature
+    ): TagConfig {
+        const catalogConfig = this.tagsService
+            .tags()
+            .find((candidate) => candidate.id === tagConfig.id)
+        if (!catalogConfig) return tagConfig
+        const inherited = getConfigTag(
+            {
+                ...feature,
+                properties: {
+                    ...feature.properties,
+                    configId: catalogConfig.id,
+                    tags: catalogConfig.tags,
+                },
+            },
+            this.tagsService.tags()
         )
+        return inherited.id === tagConfig.id ? inherited : tagConfig
+    }
+
+    /** Tags that a multi-value field shows are not listed a second time. */
+    isShownInOwnRow(tag: Tag): boolean {
+        if (tag.preset && isMultiValuePreset(tag.preset)) return true
+        if (tag.isJustAdded) return true
+        return !this.multiValueFields().some((preset) =>
+            isCoveredByPreset(preset, tag.key)
+        )
+    }
+
+    dataIsChanged(): boolean {
+        return (
+            this.pendingEntries.count() > 0 ||
+            !osmTagMapsEqual(
+                this.editedTagMap(),
+                normalizedOsmTagMap(this.originalTags)
+            )
+        )
+    }
+
+    /**
+     * The tags the editor writes: a key that is empty or ends with `:` is never
+     * produced, unless the object already carried it.
+     */
+    private editedTagMap(): Map<string, string> {
+        const originalKeys = new Set(this.originalTags.map((tag) => tag.key))
+        return normalizedOsmTagMap(
+            this.tags.filter(
+                (tag) => isEditableTagKey(tag.key) || originalKeys.has(tag.key)
+            )
+        )
+    }
+
+    presetOf(tag: Tag): Preset | undefined {
+        if (tag.preset) {
+            return isEditablePreset(tag.preset) ? tag.preset : undefined
+        }
+        // a `gender=*` tag is not the gender field, which writes male=yes…
+        const preset = this.tagsService.presets()[osmTagKeyToPresetId(tag.key)]
+        return isEditablePreset(preset) && !isMultiValuePreset(preset)
+            ? preset
+            : undefined
+    }
+
+    trackTag(tag: Tag): string {
+        return tag.preset && (!tag.preset.key || isMultiValuePreset(tag.preset))
+            ? `preset:${tag.preset._id}`
+            : tag.key
+    }
+
+    saveLabelKey(changes: number): string {
+        if (changes === 0) return 'SHARED.CLOSE'
+        return changes === 1
+            ? 'MODAL_SELECTED_ITEM.SAVE_CHANGE'
+            : 'MODAL_SELECTED_ITEM.SAVE_CHANGES'
     }
 
     changedFieldCount(): number {
         const original = normalizedOsmTagMap(this.originalTags)
-        const current = normalizedOsmTagMap(this.tags)
+        const current = this.editedTagMap()
         const keys = new Set([...original.keys(), ...current.keys()])
         let changes = 0
         for (const key of keys) {
@@ -467,35 +657,54 @@ export class ObjectEditorContentComponent {
                 changes++
             }
         }
-        return changes + (this.newPosition ? 1 : 0)
+        return (
+            changes + this.pendingEntries.count() + (this.newPosition ? 1 : 0)
+        )
     }
 
     toogleCode(): void {
         this.displayCodeState.set(!this.displayCode)
     }
 
-    addNewKey(key: string): void {
-        if (this.tags.find((tag) => tag.key === key)) {
+    addNewKey(key: string, presetId?: string): void {
+        const preset = presetId
+            ? this.tagsService.presets()[presetId]
+            : undefined
+        if (preset) {
+            if (!isEditablePreset(preset)) return
+            if (isMultiValuePreset(preset)) {
+                const alreadyAdded = this.multiValueFields().some((field) =>
+                    this.sameMultiValueField(field, preset)
+                )
+                if (alreadyAdded) return
+                this.tagsState.set([
+                    ...this.tags,
+                    { key: '', value: '', preset, isJustAdded: true },
+                ])
+                return
+            }
+            const tagKey = preset.key ?? ''
+            const alreadyAdded = tagKey
+                ? this.tags.some((tag) => tag.key === tagKey)
+                : this.tags.some((tag) => tag.preset?._id === preset._id)
+            if (alreadyAdded) return
+            this.tagsState.set([
+                ...this.tags,
+                { key: tagKey, value: '', preset, isJustAdded: true },
+            ])
             return
         }
 
-        const genericPreset = this.tagsService.presets()[key]
-        if (!genericPreset) {
-            this.tagsState.set([
-                ...this.tags,
-                { key: key, value: '', isJustAdded: true },
-            ])
-        } else {
-            this.tagsState.set([
-                ...this.tags,
-                {
-                    key: key,
-                    value: '',
-                    preset: genericPreset,
-                    isJustAdded: true,
-                },
-            ])
+        if (
+            !isEditableTagKey(key) ||
+            this.tags.some((tag) => tag.key === key)
+        ) {
+            return
         }
+        this.tagsState.set([
+            ...this.tags,
+            { key, value: '', isJustAdded: true },
+        ])
     }
 
     deleteTag(tag: Tag): void {
@@ -508,10 +717,6 @@ export class ObjectEditorContentComponent {
                 ...this.tags.slice(idx + 1),
             ])
         }
-    }
-
-    toLowerCase(text: string): string {
-        return text.toLowerCase()
     }
 
     findElement(array: Tag[], kv: Partial<Tag>): Tag {
@@ -530,6 +735,8 @@ export class ObjectEditorContentComponent {
     }
 
     createOsmElement(tagConfig: TagConfig): void {
+        this.pendingEntries.commitAll()
+        if (!this.tagsAreSavable()) return
         this.mapService.setIsProcessing(true)
 
         this.typeFicheState.set('Loading')
@@ -556,26 +763,23 @@ export class ObjectEditorContentComponent {
                         origineData: 'data_changed',
                     })
                 },
-                error: (error: unknown) => {
-                    console.error(error)
-                    this.typeFicheState.set('Edit')
-                    this.presentToast(this.translate.instant('SHARED.ERROR'))
-                },
+                error: (error: unknown) => this.handleSaveError(error),
             })
     }
 
     updateOsmElement(tagConfig?: TagConfig): void {
-        this.mapService.setIsProcessing(true)
-        this.typeFicheState.set('Loading')
-
         if (tagConfig) {
             this.tagsService.addTagTolastTagsUsed(tagConfig.id)
         }
+        this.pendingEntries.commitAll()
         if (!this.dataIsChanged() && !this.newPosition) {
-            this.mapService.setIsProcessing(false)
             this.dismiss()
             return
         }
+        if (!this.tagsAreSavable()) return
+
+        this.mapService.setIsProcessing(true)
+        this.typeFicheState.set('Loading')
 
         if (this.configService.getAddSurveyDate()) {
             this.addSurveyDate()
@@ -598,11 +802,7 @@ export class ObjectEditorContentComponent {
                         origineData: 'data_changed',
                     })
                 },
-                error: (error: unknown) => {
-                    console.error(error)
-                    this.typeFicheState.set('Edit')
-                    this.presentToast(this.translate.instant('SHARED.ERROR'))
-                },
+                error: (error: unknown) => this.handleSaveError(error),
             })
     }
 
@@ -620,18 +820,42 @@ export class ObjectEditorContentComponent {
                 next: () => {
                     this.dismiss({ redraw: true, deleted: true })
                 },
-                error: (error: unknown) => {
-                    console.error(error)
-                    this.typeFicheState.set('Edit')
-                    this.presentToast(this.translate.instant('SHARED.ERROR'))
-                },
+                error: (error: unknown) => this.handleSaveError(error),
             })
     }
 
-    pushTagsToFeature(): void {
-        this.feature.properties.tags = Object.fromEntries(
-            normalizedOsmTagMap(this.tags)
+    private handleSaveError(error: unknown): void {
+        console.error(error)
+        this.typeFicheState.set('Edit')
+        this.presentToast(
+            this.translate.instant(
+                error instanceof UploadQueueLockedError
+                    ? 'MODAL_SELECTED_ITEM.UPLOAD_LOCKED'
+                    : 'SHARED.ERROR'
+            )
         )
+    }
+
+    private tagsAreSavable(): boolean {
+        for (const tag of this.tags) {
+            if (!isEditableTagKey(tag.key)) continue
+            const issue: TagValueIssue | null = tagValueIssue(tag.value)
+            if (!issue) continue
+            this.presentToast(
+                this.translate.instant(
+                    issue === 'tooLong'
+                        ? 'MODAL_SELECTED_ITEM.VALUE_TOO_LONG'
+                        : 'MODAL_SELECTED_ITEM.VALUE_INVALID',
+                    { key: tag.key, max: MAX_OSM_TAG_LENGTH }
+                )
+            )
+            return false
+        }
+        return true
+    }
+
+    pushTagsToFeature(): void {
+        this.feature.properties.tags = Object.fromEntries(this.editedTagMap())
     }
 
     moveOsmElement(): void {
@@ -645,8 +869,15 @@ export class ObjectEditorContentComponent {
 
     applyPrimaryTagSelection(newTagConfig: SelectedTagConfig): void {
         const oldKeyTagsToDelete = Object.keys(this.tagConfig.tags)
+        // like iD, the tags the old category added go too (healthcare=pharmacy)
+        const oldAddedTags = Object.entries(this.tagConfig.addTags ?? {})
         let copyTags = cloneDeep(this.tags).filter(
-            (tag) => !oldKeyTagsToDelete.includes(tag.key)
+            (tag) =>
+                !oldKeyTagsToDelete.includes(tag.key) &&
+                !oldAddedTags.some(
+                    ([key, value]) =>
+                        key === tag.key && String(value) === String(tag.value)
+                )
         )
 
         for (const tag of copyTags) {
@@ -707,14 +938,18 @@ export class ObjectEditorContentComponent {
             'moreFields',
             this.tagConfig.moreFields || []
         )
+        // keys (`contact:phone`) and field ids (`contact/phone`) both count
         dialogRef.componentRef?.setInput('usedList', [
             ...this.tagConfig.presets,
-            ...this.tags.map((e) => e.key),
+            ...this.tags.flatMap((tag) => [
+                tag.key,
+                osmTagKeyToPresetId(tag.key),
+                ...(tag.preset?._id ? [tag.preset._id] : []),
+            ]),
+            ...this.multiValueFields().map((preset) => preset._id),
         ])
-        dialogRef.afterClosed().subscribe((newTag?: string) => {
-            if (!newTag) return
-
-            this.addNewKey(newTag)
+        dialogRef.afterClosed().subscribe((selection?: AddTagSelection) => {
+            if (selection) this.addNewKey(selection.key, selection.presetId)
         })
     }
 
@@ -725,9 +960,14 @@ export class ObjectEditorContentComponent {
         let nextTags = existingTags.map((tag) => ({ ...tag }))
         for (const [rawKey, rawValue] of Object.entries(newTags)) {
             const key = normalizeOsmTagKey(rawKey)
-            const value = String(rawValue).trim()
-            if (!key || value === '') continue
+            let value = String(rawValue).trim()
+            if (!key || !isEditableTagKey(key) || value === '') continue
             const tagIndex = nextTags.findIndex((tag) => tag.key === key)
+            // `building=*`: any value, so keep the one in place or write yes
+            if (value === '*') {
+                const current = String(nextTags[tagIndex]?.value ?? '').trim()
+                value = current || 'yes'
+            }
             if (tagIndex !== -1) {
                 nextTags[tagIndex] = {
                     ...nextTags[tagIndex],
@@ -745,7 +985,8 @@ export class ObjectEditorContentComponent {
         const sourceIndex = this.tags.indexOf(change.source)
         if (sourceIndex < 0) return
         const selected = normalizeEditorTags([change.tag])[0]
-        const nextTags = this.tags.map((tag) => ({ ...tag }))
+        // other fields keep their tag, which a pending entry may still change
+        const nextTags = [...this.tags]
         const collisionIndex = selected.key
             ? nextTags.findIndex(
                   (tag, index) =>
@@ -771,11 +1012,58 @@ export class ObjectEditorContentComponent {
         this.tagsState.set(nextTags)
     }
 
+    /** Writes (`yes`, a raw value) or removes (`null`) tags of the object. */
+    applyTagsPatch(patch: TagsPatch): void {
+        let nextTags = this.tags.map((tag) => ({ ...tag }))
+        for (const [rawKey, value] of Object.entries(patch)) {
+            const key = normalizeOsmTagKey(rawKey)
+            if (!key || !isEditableTagKey(key)) continue
+            if (value === null) {
+                nextTags = nextTags.filter((tag) => tag.key !== key)
+                continue
+            }
+            const index = nextTags.findIndex((tag) => tag.key === key)
+            if (index !== -1) {
+                nextTags[index] = { ...nextTags[index], value }
+            } else {
+                nextTags = [...nextTags, { key, value }]
+            }
+        }
+        this.tagsState.set(nextTags)
+    }
+
     addPresetsTags(newTags: Record<string, string | number>): void {
         if (newTags) {
             this.tagsState.set(this.addTags(newTags, this.tags))
             this.initComponent(this.tagConfig)
         }
+    }
+
+    confirmCancelChange(): void {
+        const changeType = this.feature.properties.changeType
+        const messageKey =
+            changeType === 'Create'
+                ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_CREATED'
+                : changeType === 'Delete'
+                  ? 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE_DELETED'
+                  : 'MAIN.SELECTION.REVERT_LOCAL_MESSAGE'
+        const data: ConfirmDialogData = {
+            title: this.translate.instant('MAIN.SELECTION.REVERT_LOCAL_TITLE'),
+            message: this.translate.instant(messageKey),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant('MAIN.SELECTION.DISCARD'),
+            destructive: true,
+        }
+        this.dialog
+            .open(ConfirmDialogComponent, {
+                data,
+                maxWidth: 'calc(100vw - 32px)',
+                panelClass: 'osmgo-dialog',
+            })
+            .afterClosed()
+            .subscribe((confirmed) => {
+                if (confirmed) void this.cancelChange()
+            })
     }
 
     async cancelChange(): Promise<void> {
@@ -806,32 +1094,6 @@ export class ObjectEditorContentComponent {
         })
     }
 
-    confirmAddSurveyDate(): void {
-        const data: ConfirmDialogData = {
-            title: this.translate.instant(
-                'MODAL_SELECTED_ITEM.ADD_SURVEY_DATE_CONFIRM_HEADER'
-            ),
-            message: this.translate.instant(
-                'MODAL_SELECTED_ITEM.ADD_SURVEY_DATE_CONFIRM_MESSAGE'
-            ),
-            cancelLabel: this.translate.instant('SHARED.NO'),
-            confirmLabel: this.translate.instant('SHARED.YES'),
-        }
-        this.dialog
-            .open(ConfirmDialogComponent, {
-                data,
-                maxWidth: 'calc(100vw - 32px)',
-                panelClass: 'osmgo-dialog',
-            })
-            .afterClosed()
-            .subscribe((confirmed) => {
-                if (confirmed) {
-                    this.addSurveyDate()
-                    this.updateOsmElement()
-                }
-            })
-    }
-
     generateISODate(date: Date): string {
         const YYYY = date.getFullYear()
         const MM =
@@ -843,41 +1105,28 @@ export class ObjectEditorContentComponent {
         return YYYY + '-' + MM + '-' + DD
     }
 
+    /** Sets the chosen date key, and refreshes the other one if present. */
     addSurveyDate(): void {
         const isoDate = this.generateISODate(new Date())
-        const tags = [...this.tags]
-
-        let tagSurveyIndex = -1
-        for (let i = 0; i < tags.length; i++) {
-            if (tags[i].key === this.configService.config().checkedKey) {
-                tagSurveyIndex = i
-                break
-            }
-        }
-        if (tagSurveyIndex !== -1) {
-            tags[tagSurveyIndex] = {
-                ...tags[tagSurveyIndex],
-                value: isoDate,
-            }
-        } else {
-            tags.push({
-                key: this.configService.config().checkedKey,
-                value: isoDate,
-            })
-        }
-
-        const possibleCheckedKeys = ['survey:date', 'check_date']
-        for (let i = 0; i < tags.length; i++) {
-            const key = tags[i].key
-            if (
-                key !== this.configService.config().checkedKey &&
-                possibleCheckedKeys.includes(key)
-            ) {
-                tags.splice(i, 1)
-                i--
-            }
+        const checkedKey = this.configService.config().checkedKey
+        const tags = this.tags.map((tag) =>
+            SURVEY_DATE_KEYS.includes(tag.key)
+                ? { ...tag, value: isoDate }
+                : tag
+        )
+        if (!tags.some((tag) => tag.key === checkedKey)) {
+            tags.push({ key: checkedKey, value: isoDate })
         }
         this.tagsState.set(tags)
+    }
+
+    copyFields(): void {
+        this.rememberFields(this.tagConfig, this.tags)
+        this.presentToast(
+            this.translate.instant('MODAL_SELECTED_ITEM.FIELDS_REMEMBERED', {
+                category: this.fieldMemoryCategory,
+            })
+        )
     }
 
     rememberFields(tagConfig: TagConfig, tags: Tag[]): void {
@@ -918,7 +1167,7 @@ export class ObjectEditorContentComponent {
         return tags
             .filter(
                 (tag) =>
-                    Boolean(tag.key) &&
+                    isEditableTagKey(tag.key) &&
                     !excludedKeys.has(tag.key) &&
                     String(tag.value).trim() !== '' &&
                     !tag.isDefaultValue
@@ -929,25 +1178,25 @@ export class ObjectEditorContentComponent {
     fixDeprecated(deprecated: DeprecatedTags): void {
         const deprecatedKeys = Object.keys(deprecated.old)
         const featureTags = { ...this.feature.properties.tags }
+        const replace = resolveReplacementTags(
+            deprecated.replace,
+            this.feature.properties.tags
+        )
         for (const deprecatedKey of deprecatedKeys) {
             delete featureTags[deprecatedKey]
         }
         this.feature.properties.tags = {
             ...featureTags,
-            ...deprecated.replace,
+            ...replace,
         }
-        const replacementTags = Object.entries(deprecated.replace).map(
-            ([key, value]) => ({ key, value })
-        )
+        const replacementTags = Object.entries(replace).map(([key, value]) => ({
+            key,
+            value,
+        }))
         const remainingTags = this.tags.filter(
             (tag) => !deprecatedKeys.includes(tag.key)
         )
         this.tagsState.set([...replacementTags, ...remainingTags])
-
-        if (this.mode !== 'Update') {
-            this.modeState.set('Update')
-            this.typeFicheState.set('Edit')
-        }
 
         this.initComponent()
     }

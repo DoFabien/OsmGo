@@ -77,4 +77,30 @@ describe('SelectComponent', () => {
             tag: { key: 'unisex', value: 'no' },
         })
     })
+
+    it('shows a multi-key field whose preset type is text, as in the catalog', () => {
+        const fixture = TestBed.createComponent(SelectComponent)
+        fixture.componentRef.setInput('preset', {
+            ...genderPreset,
+            type: 'text',
+            lbl: { en: 'Gender' },
+        })
+        fixture.componentRef.setInput('tag', { key: 'male', value: 'yes' })
+
+        expect(fixture.componentInstance.isMultiKeyPreset).toBe(true)
+        expect(fixture.componentInstance.selectedValue).toBe('male')
+        expect(fixture.componentInstance.fieldLabel).toBe('Gender')
+    })
+
+    it('labels a code-mode multi-key field with the tag key or the possible keys', () => {
+        const fixture = TestBed.createComponent(SelectComponent)
+        fixture.componentRef.setInput('preset', genderPreset)
+        fixture.componentRef.setInput('tag', { key: '', value: '' })
+        expect(fixture.componentInstance.codeLabel).toBe(
+            'male · female · unisex'
+        )
+
+        fixture.componentRef.setInput('tag', { key: 'female', value: 'yes' })
+        expect(fixture.componentInstance.codeLabel).toBe('female')
+    })
 })

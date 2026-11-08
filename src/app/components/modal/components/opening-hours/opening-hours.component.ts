@@ -6,6 +6,8 @@ import {
     model,
     type OnInit,
     output,
+    signal,
+    untracked,
 } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { MatButtonModule } from '@angular/material/button'
@@ -20,6 +22,7 @@ import Interval from '@scripts/YoHours/Interval.js'
 import OpeningHoursBuilder from '@scripts/YoHours/OpeningHoursBuilder.js'
 import OpeningHoursParser from '@scripts/YoHours/OpeningHoursParser.js'
 import WideInterval from '@scripts/YoHours/WideInterval.js'
+import { filter } from 'rxjs'
 import {
     ModalAddOpeningHoursIntervalComponent,
     type OpeningHoursDay,
@@ -31,6 +34,11 @@ import {
 
 const parser = new OpeningHoursParser()
 const builder = new OpeningHoursBuilder()
+
+interface ScheduleRow {
+    day: { index: number; text: string }
+    intervals: Interval[]
+}
 
 @Component({
     selector: 'app-opening-hours',
@@ -56,14 +64,41 @@ export class OpeningHoursComponent implements OnInit {
 
     readonly valueChangeEvent = output<string>()
     intervals: DateRange[] = []
+    /** The weekly table of each date range, rebuilt whenever the value is parsed. */
+    scheduleRows: ScheduleRow[][] = []
     isError = false
     isTooComplex = false
 
+    /**
+     * In edit mode the raw field replaces the visual editor only when the value
+     * cannot be shown there at the moment it is opened. It must not flip while
+     * the user is typing a value that happens to become valid.
+     */
+    readonly rawMode = signal(false)
+    private typedValue: string | null = null
+    private lastDisplayCode: boolean | null = null
+
     constructor() {
         effect(() => {
-            this.openingHours()
-            this.parseOpeningHours()
+            const value = this.openingHours()
+            const displayCode = this.displayCode()
+            untracked(() => {
+                this.parseOpeningHours()
+                if (
+                    value !== this.typedValue ||
+                    displayCode !== this.lastDisplayCode
+                ) {
+                    this.rawMode.set(this.isError || this.isTooComplex)
+                }
+                this.lastDisplayCode = displayCode
+            })
         })
+    }
+
+    get showRawField(): boolean {
+        return this.editMode()
+            ? this.displayCode() || this.rawMode()
+            : this.displayCode() || this.isError || this.isTooComplex
     }
 
     days = [
@@ -77,6 +112,7 @@ export class OpeningHoursComponent implements OnInit {
     ]
 
     valueChange(value: string): void {
+        this.typedValue = value
         this.openingHours.set(value)
         this.valueChangeEvent.emit(value)
         this.parseOpeningHours()
@@ -87,6 +123,7 @@ export class OpeningHoursComponent implements OnInit {
             this.intervals = parser.parse(this.openingHours())
             this.isError = false
             this.isTooComplex = false
+            this.scheduleRows = this.buildScheduleRows()
 
             if (this.openingHours() == '') {
                 this.isError = false
@@ -110,7 +147,20 @@ export class OpeningHoursComponent implements OnInit {
             }
         } catch (error) {
             this.isError = true
+            this.scheduleRows = []
         }
+    }
+
+    private buildScheduleRows(): ScheduleRow[][] {
+        return this.intervals.map((dataRange) =>
+            this.days.map((day) => ({
+                day,
+                intervals: this.findIntervalsByDay(
+                    dataRange._typical._intervals,
+                    day.index
+                ),
+            }))
+        )
     }
 
     ngOnInit(): void {
@@ -147,6 +197,7 @@ export class OpeningHoursComponent implements OnInit {
 
         this.openingHours.set(builder.build(this.intervals))
         this.valueChangeEvent.emit(this.openingHours())
+        this.parseOpeningHours()
     }
 
     addIntervals(times: OpeningHoursTime[], days: OpeningHoursDay[]): void {
@@ -164,13 +215,12 @@ export class OpeningHoursComponent implements OnInit {
 
         for (const dayIndex of daysIndex) {
             for (const time of times) {
-                const start = this.timeToMinutes(time.start)
-                const end = this.timeToMinutes(time.end)
-                let dayEnd = start > end ? dayIndex + 1 : dayIndex
-                if (dayEnd == 7) dayEnd = 0
-                currentDataRange
-                    .getTypical()
-                    .addInterval(new Interval(dayIndex, dayEnd, start, end))
+                this.addDayInterval(
+                    currentDataRange.getTypical(),
+                    dayIndex,
+                    this.timeToMinutes(time.start),
+                    this.timeToMinutes(time.end)
+                )
             }
         }
         this.openingHours.set(builder.build(this.intervals))
@@ -189,14 +239,35 @@ export class OpeningHoursComponent implements OnInit {
             { days: OpeningHoursDay[]; times: OpeningHoursTime[] }
         >()
 
+        const intervals = currentDataRange.getTypical().getIntervals()
+        const sundayNight = intervals.find(
+            (interval) =>
+                interval._dayStart === 6 &&
+                interval._dayEnd === 6 &&
+                interval._start > 0 &&
+                interval._end === 24 * 60
+        )
+        // the parser splits a Sunday night at midnight: show it as one range
+        const mondayMorning = sundayNight
+            ? intervals.find(
+                  (interval) =>
+                      interval._dayStart === 0 &&
+                      interval._dayEnd === 0 &&
+                      interval._start === 0 &&
+                      interval._end < sundayNight._start
+              )
+            : undefined
+
         for (const day of this.days) {
-            const times = this.findIntervalsByDay(
-                currentDataRange.getTypical().getIntervals(),
-                day.index
-            )
+            const times = this.findIntervalsByDay(intervals, day.index)
+                .filter((interval) => interval !== mondayMorning)
                 .map((interval) => ({
                     start: this.minutesToTime(interval._start),
-                    end: this.minutesToTime(interval._end),
+                    end: this.minutesToTime(
+                        interval === sundayNight && mondayMorning
+                            ? mondayMorning._end
+                            : interval._end
+                    ),
                 }))
                 .sort((first, second) =>
                     first.start.localeCompare(second.start)
@@ -231,13 +302,12 @@ export class OpeningHoursComponent implements OnInit {
 
             for (const dayIndex of daysIndex) {
                 for (const time of group.times) {
-                    const start = this.timeToMinutes(time.start)
-                    const end = this.timeToMinutes(time.end)
-                    let dayEnd = start > end ? dayIndex + 1 : dayIndex
-                    if (dayEnd === 7) dayEnd = 0
-                    dateRange
-                        .getTypical()
-                        .addInterval(new Interval(dayIndex, dayEnd, start, end))
+                    this.addDayInterval(
+                        dateRange.getTypical(),
+                        dayIndex,
+                        this.timeToMinutes(time.start),
+                        this.timeToMinutes(time.end)
+                    )
                 }
             }
         }
@@ -246,6 +316,26 @@ export class OpeningHoursComponent implements OnInit {
         this.openingHours.set(builder.build(this.intervals))
         this.valueChangeEvent.emit(this.openingHours())
         this.parseOpeningHours()
+    }
+
+    /**
+     * Same shape as the parser: a night past midnight ends the next day, and
+     * on Sunday it is split at midnight since the week does not wrap around.
+     */
+    private addDayInterval(
+        typical: ReturnType<DateRange['getTypical']>,
+        day: number,
+        start: number,
+        end: number
+    ): void {
+        if (start <= end) {
+            typical.addInterval(new Interval(day, day, start, end))
+        } else if (day < 6) {
+            typical.addInterval(new Interval(day, day + 1, start, end))
+        } else {
+            typical.addInterval(new Interval(day, day, start, 24 * 60))
+            typical.addInterval(new Interval(0, 0, 0, end))
+        }
     }
 
     timeToMinutes(time: string): number {
@@ -289,9 +379,18 @@ export class OpeningHoursComponent implements OnInit {
                 maxHeight: 'calc(100dvh - 24px)',
                 panelClass: 'osmgo-dialog',
                 autoFocus: 'dialog',
+                // A tap outside or Escape must not drop unsaved hours: the
+                // dialog asks for a confirmation when it holds changes.
+                disableClose: true,
                 data,
             }
         )
+        const requestClose = () => dialogRef.componentInstance?.cancel()
+        dialogRef.backdropClick().subscribe(requestClose)
+        dialogRef
+            .keydownEvents()
+            .pipe(filter((event) => event.key === 'Escape'))
+            .subscribe(requestClose)
 
         dialogRef
             .afterClosed()

@@ -1,0 +1,108 @@
+:host {
+    display: block;
+}
+.semi-combo-field {
+    padding: 12px 14px;
+    border: 1px solid var(--osmgo-divider);
+    border-radius: 16px;
+    background: var(--osmgo-surface);
+}
+.semi-combo-field > strong {
+    display: flex;
+    min-height: 28px;
+    align-items: center;
+    gap: 5px;
+    color: var(--osmgo-ink-muted);
+    font-size: 13px;
+    font-weight: 650;
+}
+.semi-combo-field > strong mat-icon {
+    width: 17px;
+    height: 17px;
+    font-size: 17px;
+}
+mat-form-field {
+    width: 100%;
+}
+.semi-combo-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 6px 0 10px;
+    padding: 0;
+    list-style: none;
+}
+.semi-combo-values li {
+    display: inline-flex;
+    min-height: 44px;
+    max-width: 100%;
+    align-items: center;
+    gap: 2px;
+    padding-left: 14px;
+    border: 1px solid var(--osmgo-blue);
+    border-radius: 22px;
+    color: var(--osmgo-blue-dark);
+    font-size: 14px;
+    background: var(--osmgo-blue-container);
+}
+.semi-combo-values span {
+    overflow-wrap: anywhere;
+}
+.semi-combo-values button {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+}
+.semi-combo-values button mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+}
+.semi-combo-add {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+}
+.semi-combo-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+.semi-combo-suggestion {
+    display: inline-flex;
+    min-height: 44px;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px 6px 10px;
+    border: 1px dashed var(--osmgo-outline);
+    border-radius: 22px;
+    color: var(--osmgo-ink-strong);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    background: var(--osmgo-surface);
+    cursor: pointer;
+}
+.semi-combo-suggestion mat-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    font-size: 18px;
+}
+.semi-combo-values button:focus-visible,
+.semi-combo-suggestion:focus-visible {
+    outline: 2px solid var(--osmgo-blue);
+    outline-offset: 2px;
+}

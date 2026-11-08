@@ -1,6 +1,6 @@
-import { LowerCasePipe } from '@angular/common'
 import {
     Component,
+    computed,
     inject,
     input,
     type OnInit,
@@ -29,6 +29,9 @@ import { SortArrayPipe } from '@pipes/sort-array.pipe'
 import { ConfigService } from '@services/config.service'
 import { CustomTagError, TagsService } from '@services/tags.service'
 
+export const normalizeCustomValue = (text: string): string =>
+    text.normalize('NFC').trim().toLowerCase().replace(/\s+/g, '_')
+
 @Component({
     selector: 'modal-primary-tag',
     templateUrl: './modal.primaryTag.html',
@@ -41,7 +44,6 @@ import { CustomTagError, TagsService } from '@services/tags.service'
         FilterExcludeTagByCountryCode,
         FiltersTagsByIdsPipe,
         LimitDisplayTagsPipe,
-        LowerCasePipe,
         MatButtonModule,
         MatButtonToggleModule,
         MatFormFieldModule,
@@ -65,6 +67,10 @@ export class ModalPrimaryTag implements OnInit {
 
     loading = true
     readonly searchText = signal('')
+    readonly customValuesOpen = signal(false)
+    readonly customValue = computed(() =>
+        normalizeCustomValue(this.searchText())
+    )
     readonly customValueError = signal<string | null>(null)
     currentListOfTags: TagConfig[] = []
     oldTagConfig: TagConfig | undefined
@@ -93,6 +99,10 @@ export class ModalPrimaryTag implements OnInit {
 
     onSearchInput(value: string): void {
         this.searchText.set(value)
+        if (value.length <= 2) {
+            this.customValuesOpen.set(false)
+            this.customValueError.set(null)
+        }
     }
 
     dismiss(data: TagConfig | null = null): void {

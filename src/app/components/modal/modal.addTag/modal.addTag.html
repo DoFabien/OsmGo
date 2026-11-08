@@ -23,6 +23,9 @@
                 #searchInput
                 matInput
                 type="search"
+                maxlength="255"
+                autocapitalize="off"
+                autocomplete="off"
                 [placeholder]="'MODAL_SELECTED_ITEM.ADD_TAG_PLACEHOLDER' | translate"
                 [value]="searchFilter()"
                 (input)="onSearchInput(searchInput.value)"
@@ -31,43 +34,42 @@
     </div>
 
     <div class="add-tag-list">
-        @if (searchFilter().length === 0) { @for (field of moreFields() |
+        @if (searchFilter().length === 0) { @for (field of fields() |
         filterByList: usedList(); track field) {
-        <button class="tag-option" type="button" (click)="select(field)">
+        <button class="tag-option" type="button" (click)="selectPreset(field)">
             <span>
-                <strong
-                    >{{ tagsService.presets()[field].lbl[language] }}</strong
-                >
-                <small>{{ field | toOsmTag }}</small>
+                <strong>{{ label(tagsService.presets()[field]) }}</strong>
+                <small>{{ keyLabel(tagsService.presets()[field]) }}</small>
             </span>
             <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
         </button>
-        } } @else { @if (!usedList().includes(nameToOsmKey(searchFilter())) &&
-        nameToOsmKey(searchFilter()).length !== 0) {
+        } } @else { @if (customKeyIsAvailable()) {
         <button
             class="tag-option tag-option--custom"
             type="button"
-            (click)="select(searchFilter())"
+            (click)="selectCustomKey()"
         >
             <span>
-                @if (tagsService.presets()[nameToOsmKey(searchFilter())]) {
-                <strong
-                    >{{
-                    tagsService.presets()[nameToOsmKey(searchFilter())].lbl[language]
-                    }}</strong
-                >
+                @if (customPreset(); as preset) {
+                <strong>{{ label(preset) }}</strong>
+                <small>{{ keyLabel(preset) }}</small>
+                } @else {
+                <small>{{ customKey() }}</small>
                 }
-                <small>{{ searchFilter() | toOsmTag }}</small>
             </span>
             <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
         </button>
         } @for ( preset of presets | filterPresetsByList: usedList() |
         removeBrands | searchFor: searchFilter() : language; track preset._id )
         {
-        <button class="tag-option" type="button" (click)="select(preset._id)">
+        <button
+            class="tag-option"
+            type="button"
+            (click)="selectPreset(preset._id)"
+        >
             <span>
-                <strong>{{ preset.lbl[language] }}</strong>
-                <small>{{ preset._id | toOsmTag }}</small>
+                <strong>{{ label(preset) }}</strong>
+                <small>{{ keyLabel(preset) }}</small>
             </span>
             <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
         </button>

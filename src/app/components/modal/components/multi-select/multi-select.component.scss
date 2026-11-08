@@ -1,0 +1,92 @@
+:host {
+    display: block;
+}
+.multi-select-field {
+    padding: 12px 14px;
+    border: 1px solid var(--osmgo-divider);
+    border-radius: 16px;
+    background: var(--osmgo-surface);
+}
+.multi-select-field > strong {
+    display: flex;
+    min-height: 28px;
+    align-items: center;
+    gap: 5px;
+    color: var(--osmgo-ink-muted);
+    font-size: 13px;
+    font-weight: 650;
+}
+.multi-select-field > strong mat-icon {
+    width: 17px;
+    height: 17px;
+    font-size: 17px;
+}
+.multi-select-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+.multi-select-option {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: 1px solid var(--osmgo-outline);
+    border-radius: 22px;
+    color: var(--osmgo-ink-strong);
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    background: var(--osmgo-surface);
+    cursor: pointer;
+}
+.multi-select-option span {
+    overflow-wrap: anywhere;
+}
+.multi-select-option mat-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    font-size: 18px;
+}
+.multi-select-option small {
+    padding: 1px 6px;
+    border-radius: 8px;
+    color: var(--osmgo-amber-ink);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    background: var(--osmgo-amber-container);
+}
+.multi-select-option.is-checked {
+    border-color: var(--osmgo-blue);
+    color: var(--osmgo-blue-dark);
+    background: var(--osmgo-blue-container);
+}
+.multi-select-option.is-other {
+    border-style: dashed;
+}
+.multi-select-option:focus-visible {
+    outline: 2px solid var(--osmgo-blue);
+    outline-offset: 2px;
+}
+.multi-select-code {
+    width: 100%;
+}
+.multi-select-more {
+    min-height: 44px;
+    margin-top: 6px;
+}
+.multi-select-custom {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+}
+.multi-select-custom mat-form-field {
+    width: 100%;
+}

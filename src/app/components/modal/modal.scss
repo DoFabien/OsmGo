@@ -17,7 +17,7 @@
     padding: 4px 10px;
     color: var(--osmgo-ink-strong);
     background: var(--osmgo-surface);
-    box-shadow: 0 2px 12px rgba(25, 42, 35, 0.1);
+    box-shadow: 0 2px 12px var(--osmgo-shadow);
 
     h1 {
         flex: 1;
@@ -89,7 +89,7 @@
     bottom: 0;
     border-top: 1px solid var(--osmgo-divider);
     background: var(--osmgo-surface);
-    box-shadow: 0 -3px 16px rgba(25, 42, 35, 0.1);
+    box-shadow: 0 -3px 16px var(--osmgo-shadow);
 }
 
 .modified-warning {
@@ -135,6 +135,7 @@
 }
 
 .delete-action {
+    --mat-icon-button-icon-color: var(--osmgo-error);
     color: var(--osmgo-error);
 }
 

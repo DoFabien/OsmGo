@@ -1,124 +1,92 @@
-@if (preset().type === 'select' || isMultiKeyPreset) {
-    <app-select
-        [tag]="tag()"
-        [preset]="preset()"
-        [language]="language()"
-        [displayCode]="displayCode()"
-        (addTags)="addTags.emit($event)"
-        (tagChange)="tagChange.emit($event)"
-    ></app-select>
-} @else if (preset().type === 'list') {
-    <article class="edit-field">
-        <header>
-            <strong>
-                @if (displayCode()) {
-                    <mat-icon fontSet="material-symbols-rounded">code</mat-icon
-                    >{{ preset().key }}
-                } @else {
-                    {{ preset().lbl[language()] || preset().lbl['en'] }}
-                }
-            </strong>
-        </header>
-
-        <div class="field-control">
-            @if (!displayCode()) {
-                <button
-                    class="list-value"
-                    type="button"
-                    (click)="emitOpenModal(tag())"
-                >
-                    @if (tag().value === '') {
-                        <span class="undefined-value">{{
-                            'MODAL_SELECTED_ITEM.UNDEFINED_VALUE' | translate
-                        }}</span>
-                    } @else if (
-                        tag() | displayPresetLabel: preset();
-                        as option
-                    ) {
-                        <span>{{
-                            option.lbl?.[language()] ||
-                                option.lbl?.['en'] ||
-                                option.v
-                        }}</span>
+@if (isEditable) {
+    @if (isMultiValuePreset) {
+        <app-multi-select
+            [preset]="preset()"
+            [tags]="tags()"
+            [language]="language()"
+            [displayCode]="displayCode()"
+            (tagsPatch)="tagsPatch.emit($event)"
+        ></app-multi-select>
+    } @else if (preset().type === 'semiCombo') {
+        <app-semi-combo
+            [tag]="tag()"
+            [preset]="preset()"
+            [language]="language()"
+            [displayCode]="displayCode()"
+            (tagChange)="tagChange.emit($event)"
+        ></app-semi-combo>
+    } @else if (preset().type === 'select' || isMultiKeyPreset) {
+        <app-select
+            [tag]="tag()"
+            [preset]="preset()"
+            [language]="language()"
+            [displayCode]="displayCode()"
+            (addTags)="addTags.emit($event)"
+            (tagChange)="tagChange.emit($event)"
+        ></app-select>
+    } @else if (preset().type === 'list') {
+        <article class="edit-field">
+            <header>
+                <strong>
+                    @if (displayCode()) {
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >code</mat-icon
+                        >{{ preset().key }}
                     } @else {
-                        <span>{{ tag().value }}</span>
+                        {{ fieldLabel }}
                     }
-                    <mat-icon fontSet="material-symbols-rounded"
-                        >expand_more</mat-icon
-                    >
-                </button>
-            } @else {
-                <mat-form-field appearance="outline" subscriptSizing="dynamic">
-                    <input
-                        matInput
-                        type="text"
-                        [(ngModel)]="tag().value"
-                        [placeholder]="tag().key"
-                    />
-                </mat-form-field>
-            }
-            <button
-                mat-icon-button
-                type="button"
-                [attr.aria-label]="'SHARED.CLEAR' | translate"
-                (click)="tag().value = ''"
-            >
-                <mat-icon fontSet="material-symbols-rounded">close</mat-icon>
-            </button>
-        </div>
-    </article>
-} @else if (
-    ['number', 'text', 'tel', 'url', 'email'].includes(preset().type || '')
-) {
-    <article class="edit-field">
-        <header>
-            <strong>
-                @if (displayCode()) {
-                    <mat-icon fontSet="material-symbols-rounded">code</mat-icon
-                    >{{ preset().key }}
-                } @else {
-                    {{ preset().lbl[language()] || preset().lbl['en'] }}
-                }
-            </strong>
-            @if (preset().type === 'url' && tag().value) {
-                <a
-                    [href]="tag().value"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    [attr.aria-label]="'A11Y.OPEN_LINK' | translate"
-                >
-                    <mat-icon fontSet="material-symbols-rounded"
-                        >open_in_new</mat-icon
-                    >
-                </a>
-            }
-        </header>
+                </strong>
+            </header>
 
-        @if (preset().key === 'opening_hours') {
-            <app-opening-hours
-                [openingHours]="openingHoursValue"
-                [displayCode]="displayCode()"
-                [editMode]="true"
-                (valueChangeEvent)="tag().value = $event"
-            ></app-opening-hours>
-        } @else {
             <div class="field-control">
-                <mat-form-field appearance="outline" subscriptSizing="dynamic">
-                    <input
-                        matInput
-                        [type]="
-                            preset().type === 'number'
-                                ? 'number'
-                                : preset().type || 'text'
-                        "
-                        [(ngModel)]="tag().value"
-                        [placeholder]="tag().key"
-                    />
-                </mat-form-field>
+                @if (!displayCode()) {
+                    <button
+                        class="list-value"
+                        type="button"
+                        (click)="emitOpenModal(tag())"
+                    >
+                        @if (tag().value === '') {
+                            <span class="undefined-value">{{
+                                'MODAL_SELECTED_ITEM.UNDEFINED_VALUE'
+                                    | translate
+                            }}</span>
+                        } @else if (
+                            tag() | displayPresetLabel: preset();
+                            as option
+                        ) {
+                            <span>{{
+                                option.lbl?.[language()] ||
+                                    option.lbl?.['en'] ||
+                                    option.v
+                            }}</span>
+                        } @else {
+                            <span>{{ tag().value }}</span>
+                        }
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >expand_more</mat-icon
+                        >
+                    </button>
+                } @else {
+                    <mat-form-field
+                        appearance="outline"
+                        subscriptSizing="dynamic"
+                    >
+                        <input
+                            matInput
+                            type="text"
+                            maxlength="255"
+                            [attr.aria-label]="preset().key"
+                            [(ngModel)]="tag().value"
+                        />
+                    </mat-form-field>
+                }
                 <button
                     mat-icon-button
                     type="button"
-                    [attr.aria-label]="'SHARED.CLEAR' | translate"
+                    [attr.aria-label]="
+                        'SHARED.CLEAR_FIELD'
+                            | translate: { field: fieldLabel || preset().key }
+                    "
                     (click)="tag().value = ''"
                 >
                     <mat-icon fontSet="material-symbols-rounded"
@@ -126,6 +94,92 @@
                     >
                 </button>
             </div>
-        }
-    </article>
+            @if (displayCode() && valueLimitReached) {
+                <p class="field-hint" role="status">
+                    {{
+                        'MODAL_SELECTED_ITEM.VALUE_LIMIT'
+                            | translate: { max: maxLength }
+                    }}
+                </p>
+            }
+        </article>
+    } @else if (
+        ['number', 'text', 'tel', 'url', 'email'].includes(preset().type || '')
+    ) {
+        <article class="edit-field">
+            <header>
+                <strong>
+                    @if (displayCode()) {
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >code</mat-icon
+                        >{{ preset().key }}
+                    } @else {
+                        {{ fieldLabel }}
+                    }
+                </strong>
+                @if (preset().type === 'url' && canOpenLink) {
+                    <a
+                        [href]="tag().value"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        [attr.aria-label]="'A11Y.OPEN_LINK' | translate"
+                    >
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >open_in_new</mat-icon
+                        >
+                    </a>
+                }
+            </header>
+
+            @if (preset().key === 'opening_hours') {
+                <app-opening-hours
+                    [openingHours]="openingHoursValue"
+                    [displayCode]="displayCode()"
+                    [editMode]="true"
+                    (valueChangeEvent)="tag().value = $event"
+                ></app-opening-hours>
+            } @else {
+                <div class="field-control">
+                    <mat-form-field
+                        appearance="outline"
+                        subscriptSizing="dynamic"
+                    >
+                        <input
+                            matInput
+                            [type]="inputType"
+                            [attr.inputmode]="inputMode"
+                            [attr.maxlength]="maxLength"
+                            [attr.aria-label]="
+                                displayCode() ? preset().key : fieldLabel
+                            "
+                            [ngModel]="tag().value"
+                            (ngModelChange)="editValue($event)"
+                        />
+                    </mat-form-field>
+                    <button
+                        mat-icon-button
+                        type="button"
+                        [attr.aria-label]="
+                            'SHARED.CLEAR_FIELD'
+                                | translate
+                                    : { field: fieldLabel || preset().key }
+                        "
+                        (click)="tag().value = ''"
+                    >
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >close</mat-icon
+                        >
+                    </button>
+                </div>
+                @if (valueLimitReached) {
+                    <p class="field-hint" role="status">
+                        {{
+                            'MODAL_SELECTED_ITEM.VALUE_LIMIT'
+                                | translate: { max: maxLength }
+                        }}
+                    </p>
+                }
+            }
+        </article>
+    }
 }

@@ -1,5 +1,5 @@
 import type { ComponentType } from '@angular/cdk/portal'
-import { Component, inject } from '@angular/core'
+import { Component, inject, type OnDestroy } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatDialog } from '@angular/material/dialog'
 import { MatIconModule } from '@angular/material/icon'
@@ -24,7 +24,7 @@ import { HiddenTagsComponent } from './hidden-tags/hidden-tags.component'
         TranslateModule,
     ],
 })
-export class ManageTagsComponent {
+export class ManageTagsComponent implements OnDestroy {
     readonly configService = inject(ConfigService)
     readonly mapService = inject(MapService)
     readonly tagsService = inject(TagsService)
@@ -54,12 +54,15 @@ export class ManageTagsComponent {
     }
 
     back() {
+        void this.overlayNavigation.close()
+    }
+
+    ngOnDestroy(): void {
+        // The screen can also be closed by the Android back button, Escape or a
+        // tap outside, so the map is refreshed whatever the way out.
         if (this.mapService.map) {
-            //&& this.refreshFilterMapAfterClose === true
             this.mapService.filterMakerByIds(this.tagsService.hiddenTagsIds())
         }
-
-        void this.overlayNavigation.close()
     }
 
     private openTagDialog<T>(

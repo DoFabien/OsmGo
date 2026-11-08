@@ -49,7 +49,7 @@ header a {
     align-items: center;
     justify-content: space-between;
     padding: 6px 12px;
-    border: 1px solid var(--osmgo-outline-soft);
+    border: 1px solid var(--osmgo-outline);
     border-radius: 13px;
     color: var(--osmgo-ink-strong);
     text-align: left;
@@ -58,4 +58,9 @@ header a {
 .undefined-value {
     color: var(--osmgo-ink-muted);
     font-style: italic;
+}
+.field-hint {
+    margin: 6px 2px 0;
+    color: var(--osmgo-ink-muted);
+    font-size: 12px;
 }

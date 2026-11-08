@@ -36,6 +36,18 @@
 .category-tabs mat-button-toggle {
     min-width: 0;
 }
+// "Derniers tags utilisés" does not fit on one line at 390 px.
+:host ::ng-deep .category-tabs .mat-button-toggle-label-content {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: normal;
+}
 .category-list {
     display: grid;
     gap: 8px;
@@ -48,10 +60,24 @@
     color: var(--osmgo-ink-muted);
     font-size: 15px;
 }
+.custom-values__toggle {
+    min-height: 48px;
+    border-radius: 14px;
+}
+.custom-values__hint {
+    margin: 0 0 10px;
+    color: var(--osmgo-ink-muted);
+    font-size: 13px;
+}
 .custom-values > div {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+}
+.custom-values__error {
+    margin: 10px 0 0;
+    color: var(--osmgo-error);
+    font-size: 13px;
 }
 .custom-values .code {
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;

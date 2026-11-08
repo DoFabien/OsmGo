@@ -15,8 +15,8 @@
     line-height: 1.35;
 }
 .notice--error {
-    color: #690005;
-    background: #ffdad6;
+    color: var(--osmgo-on-error-container);
+    background: var(--osmgo-error-container);
 }
 .notice--warning {
     color: var(--osmgo-amber-ink);

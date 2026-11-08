@@ -35,10 +35,16 @@ describe('search normalization', () => {
 })
 
 describe('OSM key and preset identifiers', () => {
-    it('normalizes Unicode, whitespace and every slash in a custom key', () => {
-        expect(nameToOsmKey('  Réf   locale / sous / clé  ')).toBe(
-            'ref_locale:sous:cle'
-        )
+    it('keeps a custom key as typed, with spaces as underscores', () => {
+        for (const key of [
+            'socket:type2',
+            'ref:FR:SIRET',
+            'fuel:octane_95',
+            'seamark:light:1:colour',
+        ]) {
+            expect(nameToOsmKey(`  ${key} `)).toBe(key)
+        }
+        expect(nameToOsmKey('  opening   hours ')).toBe('opening_hours')
         expect(osmTagKeyToPresetId('contact:social:twitter')).toBe(
             'contact/social/twitter'
         )

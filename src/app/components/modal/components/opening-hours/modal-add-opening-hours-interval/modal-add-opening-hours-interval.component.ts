@@ -1,11 +1,18 @@
 import { Component, computed, inject, signal } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
-import { MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog'
+import {
+    MAT_DIALOG_DATA,
+    MatDialog,
+    MatDialogRef,
+} from '@angular/material/dialog'
 import { MatFormFieldModule } from '@angular/material/form-field'
 import { MatIconModule } from '@angular/material/icon'
 import { MatInputModule } from '@angular/material/input'
-import { TranslateModule } from '@ngx-translate/core'
-import { CharLimitPipe } from '@pipes/charLimit.pipe'
+import {
+    ConfirmDialogComponent,
+    type ConfirmDialogData,
+} from '@components/shared/confirm-dialog/confirm-dialog'
+import { TranslateModule, TranslateService } from '@ngx-translate/core'
 
 export interface OpeningHoursTime {
     start: string
@@ -59,55 +66,123 @@ const timeToMinutes = (value: string): number => {
     return hours * 60 + minutes
 }
 
-export function openingHoursScheduleIsValid(
-    groups: OpeningHoursScheduleGroup[]
-): boolean {
-    if (groups.length === 0) return false
-    const intervalsByDay = new Map<number, Array<[number, number]>>()
+export type OpeningHoursIssueCode =
+    | 'noDay'
+    | 'noRange'
+    | 'invalidTime'
+    | 'sameTime'
+    | 'overlap'
 
-    for (const group of groups) {
+export interface OpeningHoursIssue {
+    groupIndex: number
+    /** Absent for an issue that concerns the whole group. */
+    timeIndex?: number
+    code: OpeningHoursIssueCode
+}
+
+const MINUTES_PER_DAY = 24 * 60
+const MINUTES_PER_WEEK = 7 * MINUTES_PER_DAY
+
+interface WeekSpan {
+    start: number
+    end: number
+    groupIndex: number
+    timeIndex: number
+}
+
+/** A range whose end is before its start runs past midnight into the next day. */
+export const endsNextDay = (time: OpeningHoursTime): boolean =>
+    START_TIME_PATTERN.test(time.start) &&
+    END_TIME_PATTERN.test(time.end) &&
+    timeToMinutes(time.end) < timeToMinutes(time.start)
+
+const weekSpansOverlap = (first: WeekSpan, second: WeekSpan): boolean =>
+    [-MINUTES_PER_WEEK, 0, MINUTES_PER_WEEK].some(
+        (shift) =>
+            first.start < second.end + shift && second.start + shift < first.end
+    )
+
+export function openingHoursScheduleIssues(
+    groups: OpeningHoursScheduleGroup[]
+): OpeningHoursIssue[] {
+    const issues: OpeningHoursIssue[] = []
+    const spans: WeekSpan[] = []
+
+    groups.forEach((group, groupIndex) => {
         const selectedDays = group.days
             .filter((day) => day.selected)
             .map((day) => day.index)
-        if (selectedDays.length === 0 || group.times.length === 0) return false
+        if (selectedDays.length === 0) {
+            issues.push({ groupIndex, code: 'noDay' })
+        }
+        if (group.times.length === 0) {
+            issues.push({ groupIndex, code: 'noRange' })
+        }
 
-        const intervals: Array<[number, number]> = []
-        for (const time of group.times) {
+        group.times.forEach((time, timeIndex) => {
             if (
                 !START_TIME_PATTERN.test(time.start) ||
                 !END_TIME_PATTERN.test(time.end)
             ) {
-                return false
+                issues.push({ groupIndex, timeIndex, code: 'invalidTime' })
+                return
             }
             const start = timeToMinutes(time.start)
             const end = timeToMinutes(time.end)
-            if (end <= start) return false
-            intervals.push([start, end])
-        }
+            if (end === start) {
+                issues.push({ groupIndex, timeIndex, code: 'sameTime' })
+                return
+            }
+            const length =
+                end > start ? end - start : end + MINUTES_PER_DAY - start
+            for (const day of selectedDays) {
+                const weekStart = day * MINUTES_PER_DAY + start
+                spans.push({
+                    start: weekStart,
+                    end: weekStart + length,
+                    groupIndex,
+                    timeIndex,
+                })
+            }
+        })
+    })
 
-        for (const day of selectedDays) {
-            intervalsByDay.set(day, [
-                ...(intervalsByDay.get(day) ?? []),
-                ...intervals,
-            ])
+    const overlapping = new Set<string>()
+    for (let first = 0; first < spans.length; first++) {
+        for (let second = first + 1; second < spans.length; second++) {
+            if (weekSpansOverlap(spans[first], spans[second])) {
+                for (const span of [spans[first], spans[second]]) {
+                    overlapping.add(`${span.groupIndex}:${span.timeIndex}`)
+                }
+            }
         }
     }
-
-    for (const intervals of intervalsByDay.values()) {
-        intervals.sort(([left], [right]) => left - right)
-        for (let index = 1; index < intervals.length; index++) {
-            if (intervals[index][0] < intervals[index - 1][1]) return false
-        }
+    for (const key of overlapping) {
+        const [groupIndex, timeIndex] = key.split(':').map(Number)
+        issues.push({ groupIndex, timeIndex, code: 'overlap' })
     }
-    return true
+    return issues
 }
+
+export function openingHoursScheduleIsValid(
+    groups: OpeningHoursScheduleGroup[]
+): boolean {
+    return groups.length > 0 && openingHoursScheduleIssues(groups).length === 0
+}
+
+const scheduleSignature = (groups: OpeningHoursScheduleGroup[]): string =>
+    JSON.stringify(
+        groups.map((group) => [
+            group.days.filter((day) => day.selected).map((day) => day.index),
+            group.times.map((time) => [time.start, time.end]),
+        ])
+    )
 
 @Component({
     selector: 'app-modal-add-opening-hours-interval',
     templateUrl: './modal-add-opening-hours-interval.component.html',
     styleUrls: ['./modal-add-opening-hours-interval.component.scss'],
     imports: [
-        CharLimitPipe,
         MatButtonModule,
         MatFormFieldModule,
         MatIconModule,
@@ -122,7 +197,10 @@ export class ModalAddOpeningHoursIntervalComponent {
     private readonly data = inject<OpeningHoursDialogData>(MAT_DIALOG_DATA, {
         optional: true,
     })
+    private readonly dialog = inject(MatDialog)
+    private readonly translate = inject(TranslateService)
     private readonly previousEndTimes = new Map<number, string>()
+    private confirmingDiscard = false
     private nextTimeRangeId = 0
     private nextGroupId = 0
 
@@ -130,12 +208,35 @@ export class ModalAddOpeningHoursIntervalComponent {
         this.createInitialGroups(this.data?.groups)
     )
 
-    readonly groupsAreValid = computed(() =>
-        openingHoursScheduleIsValid(this.groups())
+    private readonly initialSignature = scheduleSignature(this.groups())
+    readonly isDirty = computed(
+        () => scheduleSignature(this.groups()) !== this.initialSignature
     )
 
-    dayIsSelected(group: EditableScheduleGroup): boolean {
-        return group.days.some((day) => day.selected)
+    readonly issues = computed(() => {
+        const byTarget = new Map<string, OpeningHoursIssueCode>()
+        for (const issue of openingHoursScheduleIssues(this.groups())) {
+            const target = `${issue.groupIndex}:${issue.timeIndex ?? ''}`
+            if (!byTarget.has(target)) byTarget.set(target, issue.code)
+        }
+        return byTarget
+    })
+    readonly groupsAreValid = computed(
+        () => this.groups().length > 0 && this.issues().size === 0
+    )
+
+    /** Short weekday names in the interface language, Monday first. */
+    readonly shortDayLabels = this.createShortDayLabels()
+
+    issueOf(
+        groupIndex: number,
+        timeIndex?: number
+    ): OpeningHoursIssueCode | undefined {
+        return this.issues().get(`${groupIndex}:${timeIndex ?? ''}`)
+    }
+
+    endsNextDay(time: OpeningHoursTime): boolean {
+        return endsNextDay(time)
     }
 
     updateTimeRange(
@@ -236,7 +337,30 @@ export class ModalAddOpeningHoursIntervalComponent {
     }
 
     cancel(): void {
-        this.dialogRef.close(null)
+        if (!this.isDirty()) {
+            this.dialogRef.close(null)
+            return
+        }
+        if (this.confirmingDiscard) return
+        this.confirmingDiscard = true
+        const data: ConfirmDialogData = {
+            title: this.translate.instant('MAIN.SELECTION.DISCARD_TITLE'),
+            message: this.translate.instant('MAIN.SELECTION.DISCARD_MESSAGE'),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant('MAIN.SELECTION.DISCARD'),
+            destructive: true,
+        }
+        this.dialog
+            .open(ConfirmDialogComponent, {
+                data,
+                maxWidth: 'calc(100vw - 32px)',
+                panelClass: 'osmgo-dialog',
+            })
+            .afterClosed()
+            .subscribe((confirmed) => {
+                this.confirmingDiscard = false
+                if (confirmed) this.dialogRef.close(null)
+            })
     }
 
     submit(): void {
@@ -247,6 +371,25 @@ export class ModalAddOpeningHoursIntervalComponent {
             times: group.times.map(({ start, end }) => ({ start, end })),
         }))
         this.dialogRef.close({ groups })
+    }
+
+    private createShortDayLabels(): string[] {
+        let formatter: Intl.DateTimeFormat
+        try {
+            formatter = new Intl.DateTimeFormat(
+                this.translate.getCurrentLang() || undefined,
+                { weekday: 'short', timeZone: 'UTC' }
+            )
+        } catch {
+            formatter = new Intl.DateTimeFormat(undefined, {
+                weekday: 'short',
+                timeZone: 'UTC',
+            })
+        }
+        // 1 January 2024 is a Monday.
+        return DAY_LABELS.map((_label, index) =>
+            formatter.format(new Date(Date.UTC(2024, 0, 1 + index)))
+        )
     }
 
     private createInitialGroups(

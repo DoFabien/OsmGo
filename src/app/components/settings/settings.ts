@@ -1,12 +1,16 @@
-import { Component, inject } from '@angular/core'
+import { Component, computed, inject } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatDialog } from '@angular/material/dialog'
 import { MatDividerModule } from '@angular/material/divider'
 import { MatFormFieldModule } from '@angular/material/form-field'
 import { MatIconModule } from '@angular/material/icon'
 import { MatSelectModule } from '@angular/material/select'
-import { MatSlideToggleModule } from '@angular/material/slide-toggle'
+import {
+    type MatSlideToggleChange,
+    MatSlideToggleModule,
+} from '@angular/material/slide-toggle'
 import { MatSliderModule } from '@angular/material/slider'
+import { MatSnackBar } from '@angular/material/snack-bar'
 import {
     ConfirmDialogComponent,
     type ConfirmDialogData,
@@ -14,10 +18,11 @@ import {
 import { ScreenHeaderComponent } from '@components/shared/screen-header/screen-header'
 import { TranslateModule, TranslateService } from '@ngx-translate/core'
 import { ConfigService } from '@services/config.service'
-import { DataService } from '@services/data.service'
+import { DataService, UploadInFlightError } from '@services/data.service'
 import { MapService } from '@services/map.service'
 import { OsmAuthService } from '@services/osm-auth.service'
 import { OverlayNavigationService } from '@services/overlay-navigation.service'
+import { UploadCoordinatorService } from '@services/upload-coordinator.service'
 import { firstValueFrom } from 'rxjs'
 import { take } from 'rxjs/operators'
 
@@ -45,6 +50,15 @@ export class SettingsPage {
     private readonly dialog = inject(MatDialog)
     private readonly translate = inject(TranslateService)
     private readonly overlayNavigation = inject(OverlayNavigationService)
+    private readonly snackBar = inject(MatSnackBar)
+    private readonly uploadCoordinator = inject(UploadCoordinatorService)
+
+    /** Wiping local data while a request is running could lose or duplicate edits. */
+    readonly uploadIsRunning = computed(
+        () =>
+            this.dataService.uploadInFlight() ||
+            this.uploadCoordinator.inFlight()
+    )
 
     back(): void {
         void this.overlayNavigation.close()
@@ -87,6 +101,12 @@ export class SettingsPage {
             5000,
             this.mapService.map
         )
+        this.mapService.toogleMesureFilter(
+            this.configService.getFilterWayByArea(),
+            'way_fill_changed',
+            5000,
+            this.mapService.map
+        )
     }
 
     filterWayByLength(checked: boolean): void {
@@ -95,6 +115,12 @@ export class SettingsPage {
         this.mapService.toogleMesureFilter(
             this.configService.getFilterWayByLength(),
             'way_line',
+            0.2,
+            this.mapService.map
+        )
+        this.mapService.toogleMesureFilter(
+            this.configService.getFilterWayByLength(),
+            'way_line_changed',
             0.2,
             this.mapService.map
         )
@@ -170,43 +196,139 @@ export class SettingsPage {
     }
 
     async deleteCache(): Promise<void> {
-        await this.dataService.clearCache()
+        if (this.refuseWhileUploading()) return
+
+        const pendingCount = this.dataService.changedFeatureCount()
+        const messages = [
+            this.translate.instant('SETTINGS.DELETE_CACHE_CONFIRM_MESSAGE'),
+        ]
+        if (pendingCount > 0) {
+            messages.push(
+                this.translate.instant(
+                    pendingCount === 1
+                        ? 'SETTINGS.DELETE_CACHE_PENDING_ONE'
+                        : 'SETTINGS.DELETE_CACHE_PENDING_MANY',
+                    { count: pendingCount }
+                )
+            )
+        }
+        if (this.dataService.hasActiveUploadJournal()) {
+            messages.push(
+                this.translate.instant(
+                    'SETTINGS.DELETE_CACHE_UNRESOLVED_UPLOAD'
+                )
+            )
+        }
+        const confirmed = await this.confirm({
+            title: this.translate.instant(
+                'SETTINGS.DELETE_CACHE_CONFIRM_TITLE'
+            ),
+            message: messages.join('\n\n'),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant(
+                'SETTINGS.DELETE_CACHE_CONFIRM'
+            ),
+            destructive: true,
+        })
+        // An upload may have started while the dialog was open.
+        if (!confirmed || this.refuseWhileUploading()) return
+
+        try {
+            await this.dataService.clearCache()
+        } catch (error) {
+            if (!(error instanceof UploadInFlightError)) throw error
+            this.refuseWhileUploading(true)
+            return
+        }
+        // the service worker caches keep the app able to start offline
         const cachesKeys = await caches.keys()
         for (const key of cachesKeys) {
-            await caches.delete(key)
+            if (!key.startsWith('ngsw:')) await caches.delete(key)
         }
 
-        window.location.replace(document.baseURI)
+        this.reloadApp()
     }
 
-    async changeIsDevServer(isDev: boolean): Promise<void> {
+    async changeIsDevServer(change: MatSlideToggleChange): Promise<void> {
+        const isDev = change.checked
+        const restoreToggle = () => {
+            change.source.checked = this.configService.config().isDevServer
+        }
         if (isDev === this.configService.config().isDevServer) return
-        if (this.dataService.changedFeatureCount() > 0) {
-            const data: ConfirmDialogData = {
-                title: this.translate.instant('SETTINGS.SWITCH_SERVER_TITLE'),
-                message: this.translate.instant(
-                    'SETTINGS.SWITCH_SERVER_MESSAGE'
-                ),
-                cancelLabel: this.translate.instant('SHARED.CANCEL'),
-                confirmLabel: this.translate.instant(
-                    'SETTINGS.SWITCH_SERVER_CONFIRM'
-                ),
-                destructive: true,
-            }
-            const confirmed = await firstValueFrom(
-                this.dialog
-                    .open(ConfirmDialogComponent, {
-                        data,
-                        maxWidth: 'calc(100vw - 32px)',
-                        panelClass: 'osmgo-dialog',
-                    })
-                    .afterClosed()
-                    .pipe(take(1))
+        if (this.refuseWhileUploading()) {
+            restoreToggle()
+            return
+        }
+        const messages = [
+            this.translate.instant(
+                this.dataService.changedFeatureCount() > 0
+                    ? 'SETTINGS.SWITCH_SERVER_MESSAGE'
+                    : 'SETTINGS.SWITCH_SERVER_MESSAGE_CLEAN'
+            ),
+        ]
+        if (this.dataService.hasActiveUploadJournal()) {
+            messages.push(
+                this.translate.instant(
+                    'SETTINGS.SWITCH_SERVER_UNRESOLVED_UPLOAD'
+                )
             )
-            if (!confirmed) return
+        }
+        const confirmed = await this.confirm({
+            title: this.translate.instant('SETTINGS.SWITCH_SERVER_TITLE'),
+            message: messages.join('\n\n'),
+            cancelLabel: this.translate.instant('SHARED.CANCEL'),
+            confirmLabel: this.translate.instant(
+                'SETTINGS.SWITCH_SERVER_CONFIRM'
+            ),
+            destructive: true,
+        })
+        if (!confirmed || this.refuseWhileUploading()) {
+            restoreToggle()
+            return
+        }
+        try {
+            await this.configService.switchOsmEnvironment(isDev)
+        } catch (error) {
+            restoreToggle()
+            if (error instanceof UploadInFlightError) {
+                this.refuseWhileUploading(true)
+            } else {
+                this.snackBar.open(
+                    this.translate.instant('SETTINGS.SWITCH_SERVER_FAILED'),
+                    this.translate.instant('SHARED.CLOSE'),
+                    { duration: 6000 }
+                )
+            }
+            return
         }
         await this.osmAuthService.clearAllAuthentication()
-        await this.configService.switchOsmEnvironment(isDev)
+        this.reloadApp()
+    }
+
+    private refuseWhileUploading(force = false): boolean {
+        if (!force && !this.uploadIsRunning()) return false
+        this.snackBar.open(
+            this.translate.instant('SETTINGS.UPLOAD_IN_PROGRESS'),
+            this.translate.instant('SHARED.CLOSE'),
+            { duration: 5000 }
+        )
+        return true
+    }
+
+    private confirm(data: ConfirmDialogData): Promise<boolean> {
+        return firstValueFrom(
+            this.dialog
+                .open(ConfirmDialogComponent, {
+                    data,
+                    maxWidth: 'calc(100vw - 32px)',
+                    panelClass: 'osmgo-dialog',
+                })
+                .afterClosed()
+                .pipe(take(1))
+        ).then(Boolean)
+    }
+
+    private reloadApp(): void {
         window.location.replace(document.baseURI)
     }
 }

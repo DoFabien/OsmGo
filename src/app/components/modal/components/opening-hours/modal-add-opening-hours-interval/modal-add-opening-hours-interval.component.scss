@@ -83,6 +83,7 @@
 
 .remove-group,
 .remove-time {
+    --mat-icon-button-icon-color: var(--osmgo-danger);
     color: var(--osmgo-danger);
 }
 
@@ -137,6 +138,21 @@
     border: 1px solid var(--osmgo-divider);
     border-radius: 14px;
     background: var(--osmgo-surface-muted);
+}
+
+.time-card.has-issue {
+    border-color: var(--osmgo-error);
+}
+
+.time-message {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--osmgo-ink-muted);
+    font-size: 13px;
+
+    &.time-message--error {
+        color: var(--osmgo-error);
+    }
 }
 
 .time-grid {

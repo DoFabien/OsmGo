@@ -8,7 +8,7 @@
     gap: 8px;
     min-height: 56px;
     padding: 8px 10px;
-    border: 1px solid #f1d28a;
+    border: 1px solid var(--osmgo-amber-outline);
     border-radius: 16px;
     background: var(--osmgo-amber-container);
 }
@@ -50,10 +50,13 @@
     font-size: 18px;
 }
 .yes-button {
-    color: #fff;
-    background: #276f3b;
+    --mat-button-filled-label-text-color: var(--osmgo-on-success);
+    --mat-button-filled-container-color: var(--osmgo-success);
+    color: var(--osmgo-on-success);
+    background: var(--osmgo-success);
 }
 .no-button {
+    --mat-button-text-label-text-color: var(--osmgo-error);
     color: var(--osmgo-error);
 }
 
@@ -66,4 +69,11 @@
         padding-left: 26px;
         justify-content: flex-start;
     }
+}
+.survey-card__hint {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--osmgo-amber-ink);
+    font-size: 12px;
+    line-height: 1.3;
 }

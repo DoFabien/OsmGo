@@ -56,21 +56,33 @@
         </div>
 
         <section class="custom-values">
+            @if (!customValuesOpen()) {
+            <button
+                mat-stroked-button
+                class="custom-values__toggle"
+                type="button"
+                (click)="customValuesOpen.set(true)"
+            >
+                <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
+                {{ 'MODAL_SELECTED_ITEM.CUSTOM_KEY_VALUE' | translate }}
+            </button>
+            } @else {
             <h2>{{ 'MODAL_SELECTED_ITEM.CUSTOM_KEY_VALUE' | translate }}</h2>
+            <p class="custom-values__hint">
+                {{ 'MODAL_SELECTED_ITEM.CUSTOM_VALUE_HINT' | translate }}
+            </p>
             <div>
                 @for (key of tagsService.primaryKeys() | sortArray; track key) {
                 <button
                     mat-stroked-button
                     type="button"
-                    (click)="addCustomValue(key, searchText().toLowerCase())"
+                    (click)="addCustomValue(key, customValue())"
                 >
-                    <span class="code"
-                        >{{ key }}={{ searchText() | lowercase }}</span
-                    >
+                    <span class="code">{{ key }}={{ customValue() }}</span>
                 </button>
                 }
             </div>
-            @if (customValueError(); as errorKey) {
+            } @if (customValueError(); as errorKey) {
             <p class="custom-values__error" role="alert">
                 {{ errorKey | translate }}
             </p>

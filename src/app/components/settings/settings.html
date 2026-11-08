@@ -380,11 +380,17 @@
                 <div class="setting-copy">
                     <h3>{{ 'SETTINGS.DELETE_CACHE' | translate }}</h3>
                     <p>{{ 'SETTINGS.DELETE_CACHE_HINT' | translate }}</p>
+                    @if (uploadIsRunning()) {
+                    <p class="setting-warning" role="status">
+                        {{ 'SETTINGS.UPLOAD_IN_PROGRESS' | translate }}
+                    </p>
+                    }
                 </div>
                 <button
                     mat-stroked-button
                     class="danger-action"
                     type="button"
+                    [disabled]="uploadIsRunning()"
                     (click)="deleteCache()"
                 >
                     <mat-icon
@@ -402,20 +408,17 @@
                 <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
                     >bug_report</mat-icon
                 >
-                Developer mode
+                {{ 'SETTINGS.DEVELOPER_MODE' | translate }}
             </h2>
             <div class="setting-row">
                 <div class="setting-copy">
-                    <h3>Use the OSM development server</h3>
-                    <p>
-                        After this change, the application will be restarted and
-                        the data will be cleared.
-                    </p>
+                    <h3>{{ 'SETTINGS.DEV_SERVER' | translate }}</h3>
+                    <p>{{ 'SETTINGS.DEV_SERVER_HINT' | translate }}</p>
                 </div>
                 <mat-slide-toggle
                     [attr.aria-label]="'A11Y.USE_OSM_DEV_SERVER' | translate"
                     [checked]="configService.config().isDevServer"
-                    (change)="changeIsDevServer($event.checked)"
+                    (change)="changeIsDevServer($event)"
                 ></mat-slide-toggle>
             </div>
         </section>

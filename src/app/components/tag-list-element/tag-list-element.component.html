@@ -2,7 +2,9 @@
     <button class="tag-row__main" type="button" (click)="selected.emit(tag())">
         <span
             class="tag-icon"
-            [style.background-color]="tag().markerColor || '#26352f'"
+            [style.background-color]="
+                tag().markerColor || 'var(--osmgo-marker-fallback)'
+            "
             aria-hidden="true"
         >
             <app-icon
@@ -63,6 +65,7 @@
         @if (oldTagConfig()?.id === tag().id) {
             <span
                 class="current-indicator"
+                role="img"
                 [attr.aria-label]="'A11Y.SELECTED' | translate"
             >
                 <mat-icon fontSet="material-symbols-rounded"

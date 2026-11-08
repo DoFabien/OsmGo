@@ -49,25 +49,44 @@
                             class="day-button"
                             [class.day-button--selected]="day.selected"
                             [attr.aria-pressed]="day.selected"
+                            [attr.aria-label]="day.label | translate"
                             (click)="toggleDay(group.id, day.index)"
                         >
-                            {{ day.label | translate | charLimit: 3 }}
+                            {{ shortDayLabels[day.index] }}
                         </button>
                     }
                 </div>
 
-                @if (!dayIsSelected(group)) {
-                    <p class="day-warning">
-                        <mat-icon fontSet="material-symbols-rounded"
-                            >info</mat-icon
-                        >
-                        {{ 'OPENINGHOURS.SELECT_AT_LEAST_ONE_DAY' | translate }}
-                    </p>
+                @switch (issueOf(groupIndex)) {
+                    @case ('noDay') {
+                        <p class="day-warning" role="alert">
+                            <mat-icon fontSet="material-symbols-rounded"
+                                >info</mat-icon
+                            >
+                            {{
+                                'OPENINGHOURS.SELECT_AT_LEAST_ONE_DAY'
+                                    | translate
+                            }}
+                        </p>
+                    }
+                    @case ('noRange') {
+                        <p class="day-warning" role="alert">
+                            <mat-icon fontSet="material-symbols-rounded"
+                                >info</mat-icon
+                            >
+                            {{ 'OPENINGHOURS.ERRORS.NO_RANGE' | translate }}
+                        </p>
+                    }
                 }
 
                 <div class="time-ranges">
-                    @for (time of group.times; track time.id) {
-                        <div class="time-card">
+                    @for (
+                        time of group.times;
+                        track time.id;
+                        let timeIndex = $index
+                    ) {
+                        @let timeIssue = issueOf(groupIndex, timeIndex);
+                        <div class="time-card" [class.has-issue]="timeIssue">
                             <div class="time-grid">
                                 <mat-form-field
                                     appearance="outline"
@@ -82,6 +101,9 @@
                                         required
                                         type="time"
                                         step="300"
+                                        [attr.aria-invalid]="
+                                            timeIssue ? true : null
+                                        "
                                         [value]="time.start"
                                         (input)="
                                             updateTimeRange(
@@ -114,6 +136,9 @@
                                         [required]="time.end !== '24:00'"
                                         type="time"
                                         step="300"
+                                        [attr.aria-invalid]="
+                                            timeIssue ? true : null
+                                        "
                                         [readOnly]="time.end === '24:00'"
                                         [value]="
                                             time.end === '24:00' ? '' : time.end
@@ -172,6 +197,51 @@
                                     >delete</mat-icon
                                 >
                             </button>
+                            @switch (timeIssue) {
+                                @case ('invalidTime') {
+                                    <p
+                                        class="time-message time-message--error"
+                                        role="alert"
+                                    >
+                                        {{
+                                            'OPENINGHOURS.ERRORS.INVALID_TIME'
+                                                | translate
+                                        }}
+                                    </p>
+                                }
+                                @case ('sameTime') {
+                                    <p
+                                        class="time-message time-message--error"
+                                        role="alert"
+                                    >
+                                        {{
+                                            'OPENINGHOURS.ERRORS.SAME_TIME'
+                                                | translate
+                                        }}
+                                    </p>
+                                }
+                                @case ('overlap') {
+                                    <p
+                                        class="time-message time-message--error"
+                                        role="alert"
+                                    >
+                                        {{
+                                            'OPENINGHOURS.ERRORS.OVERLAP'
+                                                | translate
+                                        }}
+                                    </p>
+                                }
+                                @default {
+                                    @if (endsNextDay(time)) {
+                                        <p class="time-message">
+                                            {{
+                                                'OPENINGHOURS.NEXT_DAY'
+                                                    | translate
+                                            }}
+                                        </p>
+                                    }
+                                }
+                            }
                         </div>
                     }
                 </div>

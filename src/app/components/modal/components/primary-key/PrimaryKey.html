@@ -3,7 +3,7 @@
     <button class="primary-key__main" type="button" (click)="emitOpenModal()">
         <span
             class="primary-key__icon"
-            [style.background-color]="config.markerColor || '#26352f'"
+            [style.background-color]="config.markerColor || 'var(--osmgo-marker-fallback)'"
             aria-hidden="true"
         >
             <app-icon

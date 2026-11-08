@@ -14,19 +14,12 @@ export function includesNormalizedSearch(
     return normalizeSearchText(value).includes(normalizedQuery)
 }
 
+/** A key typed by the user, kept as written (`ref:FR:SIRET`, `socket:type2`). */
 export function nameToOsmKey(name: string): string {
     return String(name ?? '')
-        .normalize('NFKD')
-        .replace(/\p{M}/gu, '')
-        .toLowerCase()
+        .normalize('NFC')
         .trim()
         .replace(/\s+/g, '_')
-        .replace(/\/+/g, ':')
-        .replace(/[^a-z\-_:]/gi, '')
-        .replace(/_+/g, '_')
-        .replace(/:+/g, ':')
-        .replace(/_*:_*/g, ':')
-        .replace(/^[-_:]+|[-_:]+$/g, '')
 }
 
 export function osmTagKeyToPresetId(key: string): string {

@@ -54,7 +54,7 @@ header h2 {
     border: 1px solid var(--osmgo-divider);
     border-radius: 15px;
     color: var(--osmgo-ink-strong);
-    text-align: left;
+    text-align: start;
     background: var(--osmgo-surface);
 }
 .tag-option > span {
@@ -74,7 +74,7 @@ header h2 {
     color: var(--osmgo-blue);
 }
 .tag-option--custom {
-    border-color: #f1d28a;
+    border-color: var(--osmgo-amber-outline);
     background: var(--osmgo-amber-container);
 }
 footer {

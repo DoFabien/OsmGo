@@ -13,11 +13,12 @@ import {
 })
 export class SearchForPipe {
     transform(items: Array<Preset>, name: string, language: string) {
-        const key = osmTagKeyToPresetId(nameToOsmKey(name))
+        const key = osmTagKeyToPresetId(nameToOsmKey(name)).toLowerCase()
         const query = normalizeSearchText(name)
         return items.filter((e) => {
-            if (key && key === e._id) return false
-            if (presetIdMatchesQuery(e._id, key)) return true
+            const id = e._id.toLowerCase()
+            if (key && key === id) return false
+            if (presetIdMatchesQuery(id, key)) return true
             const searchableId = e._id.replace(/[/:_-]+/g, ' ')
             return [searchableId, e.lbl[language] ?? e.lbl.en ?? ''].some(
                 (value) => includesNormalizedSearch(value, query)

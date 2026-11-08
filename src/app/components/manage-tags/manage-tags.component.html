@@ -21,10 +21,15 @@
             <button
                 mat-flat-button
                 type="button"
+                [attr.aria-label]="
+                    ('MANAGE_TAGS.OPEN' | translate) +
+                    ' · ' +
+                    ('MANAGE_TAGS.ACTIVE_TAGS' | translate)
+                "
                 (click)="openActiveTagsModal()"
             >
-                {{ 'MANAGE_TAGS.ACTIVE_TAGS' | translate }}
-                <mat-icon fontSet="material-symbols-rounded"
+                {{ 'MANAGE_TAGS.OPEN' | translate }}
+                <mat-icon iconPositionEnd fontSet="material-symbols-rounded"
                     >chevron_right</mat-icon
                 >
             </button>
@@ -39,17 +44,19 @@
             <div class="card-copy">
                 <h2>{{ 'MANAGE_TAGS.HIDDEN_TAGS' | translate }}</h2>
                 <p>{{ 'MANAGE_TAGS.HIDDEN_TAGS_DESCRIPTION' | translate }}</p>
-                <p class="warning">
-                    {{ 'MANAGE_TAGS.HIDDEN_TAGS_WARNING' | translate }}
-                </p>
             </div>
             <button
                 mat-flat-button
                 type="button"
+                [attr.aria-label]="
+                    ('MANAGE_TAGS.OPEN' | translate) +
+                    ' · ' +
+                    ('MANAGE_TAGS.HIDDEN_TAGS' | translate)
+                "
                 (click)="openHiddenTagsModal()"
             >
-                {{ 'MANAGE_TAGS.HIDDEN_TAGS' | translate }}
-                <mat-icon fontSet="material-symbols-rounded"
+                {{ 'MANAGE_TAGS.OPEN' | translate }}
+                <mat-icon iconPositionEnd fontSet="material-symbols-rounded"
                     >chevron_right</mat-icon
                 >
             </button>
@@ -72,10 +79,15 @@
             <button
                 mat-flat-button
                 type="button"
+                [attr.aria-label]="
+                    ('MANAGE_TAGS.OPEN' | translate) +
+                    ' · ' +
+                    ('MANAGE_TAGS.BOOKMARKED_TAGS' | translate)
+                "
                 (click)="openBookmarkedTagsModal()"
             >
-                {{ 'MANAGE_TAGS.BOOKMARKED_TAGS' | translate }}
-                <mat-icon fontSet="material-symbols-rounded"
+                {{ 'MANAGE_TAGS.OPEN' | translate }}
+                <mat-icon iconPositionEnd fontSet="material-symbols-rounded"
                     >chevron_right</mat-icon
                 >
             </button>

@@ -1,0 +1,100 @@
+<article class="semi-combo-field">
+    <strong [id]="'semi-combo-' + preset()._id">
+        @if (displayCode() || !fieldLabel) {
+            <mat-icon fontSet="material-symbols-rounded">code</mat-icon
+            >{{ preset().key }}
+        } @else {
+            {{ fieldLabel }}
+        }
+    </strong>
+
+    @if (displayCode()) {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <input
+                #rawInput
+                matInput
+                type="text"
+                [attr.maxlength]="maxLength"
+                [attr.aria-label]="preset().key"
+                [value]="tag().value"
+                (input)="editRawValue(rawInput.value)"
+            />
+        </mat-form-field>
+    } @else {
+        @if (values().length > 0) {
+            <ul
+                class="semi-combo-values"
+                [attr.aria-labelledby]="'semi-combo-' + preset()._id"
+            >
+                @for (value of values(); track $index) {
+                    <li>
+                        <span>{{ valueLabel(value) }}</span>
+                        <button
+                            type="button"
+                            [attr.aria-label]="
+                                'MODAL_SELECTED_ITEM.REMOVE_VALUE'
+                                    | translate: { value: valueLabel(value) }
+                            "
+                            (click)="removeValue($index)"
+                        >
+                            <mat-icon fontSet="material-symbols-rounded"
+                                >close</mat-icon
+                            >
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+
+        <form
+            class="semi-combo-add"
+            (submit)="addQuery(); $event.preventDefault()"
+        >
+            <mat-form-field appearance="outline" subscriptSizing="dynamic">
+                <mat-label>{{
+                    'MODAL_SELECTED_ITEM.ADD_VALUE' | translate
+                }}</mat-label>
+                <input
+                    #queryInput
+                    matInput
+                    type="text"
+                    enterkeyhint="done"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    [attr.maxlength]="maxLength"
+                    [attr.aria-label]="
+                        'MODAL_SELECTED_ITEM.ADD_VALUE_TO'
+                            | translate: { field: fieldLabel || preset().key }
+                    "
+                    [value]="query()"
+                    (input)="onQueryInput(queryInput.value)"
+                />
+            </mat-form-field>
+            <button
+                mat-icon-button
+                type="submit"
+                [disabled]="query().trim() === ''"
+                [attr.aria-label]="'SHARED.ADD' | translate"
+            >
+                <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
+            </button>
+        </form>
+
+        @if (suggestions().length > 0) {
+            <div class="semi-combo-suggestions">
+                @for (option of suggestions(); track option.v) {
+                    <button
+                        type="button"
+                        class="semi-combo-suggestion"
+                        (click)="addValue(option.v)"
+                    >
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >add</mat-icon
+                        >
+                        <span>{{ optionLabel(option) }}</span>
+                    </button>
+                }
+            </div>
+        }
+    }
+</article>

@@ -1,0 +1,110 @@
+<article class="multi-select-field">
+    <strong [id]="'multi-select-' + preset()._id">
+        @if (!displayCode() && fieldLabel) {
+            {{ fieldLabel }}
+        } @else {
+            <mat-icon fontSet="material-symbols-rounded">code</mat-icon
+            >{{ codeLabel }}
+        }
+    </strong>
+
+    <div
+        class="multi-select-options"
+        role="group"
+        [attr.aria-labelledby]="'multi-select-' + preset()._id"
+    >
+        @for (item of visibleItems(); track item.key) {
+            @if (displayCode() && item.present) {
+                <mat-form-field
+                    class="multi-select-code"
+                    appearance="outline"
+                    subscriptSizing="dynamic"
+                >
+                    <mat-label>{{ item.key }}</mat-label>
+                    <input
+                        #codeInput
+                        matInput
+                        type="text"
+                        [attr.maxlength]="maxLength"
+                        [value]="item.value"
+                        (input)="editValue(item, codeInput.value)"
+                    />
+                </mat-form-field>
+            } @else {
+                <button
+                    class="multi-select-option"
+                    type="button"
+                    role="checkbox"
+                    [class.is-checked]="item.value === 'yes'"
+                    [class.is-other]="ariaChecked(item) === 'mixed'"
+                    [attr.aria-checked]="ariaChecked(item)"
+                    (click)="toggle(item)"
+                >
+                    @if (item.value === 'yes') {
+                        <mat-icon fontSet="material-symbols-rounded"
+                            >check</mat-icon
+                        >
+                    }
+                    <span>{{ itemLabel(item) }}</span>
+                    @if (ariaChecked(item) === 'mixed') {
+                        <small>{{ item.value }}</small>
+                    }
+                </button>
+            }
+        }
+    </div>
+
+    @if (hiddenCount() > 0 || expanded()) {
+        <button
+            class="multi-select-more"
+            mat-button
+            type="button"
+            [attr.aria-expanded]="expanded()"
+            (click)="toggleExpanded()"
+        >
+            <mat-icon fontSet="material-symbols-rounded">{{
+                expanded() ? 'expand_less' : 'expand_more'
+            }}</mat-icon>
+            @if (expanded()) {
+                {{ 'MODAL_SELECTED_ITEM.SHOW_FEWER_OPTIONS' | translate }}
+            } @else {
+                {{
+                    'MODAL_SELECTED_ITEM.SHOW_ALL_OPTIONS'
+                        | translate: { count: items().length }
+                }}
+            }
+        </button>
+    }
+
+    @if (canAddCustomValue()) {
+        <form
+            class="multi-select-custom"
+            (submit)="addCustomValue(); $event.preventDefault()"
+        >
+            <mat-form-field appearance="outline" subscriptSizing="dynamic">
+                <mat-label>{{
+                    'MODAL_SELECTED_ITEM.CUSTOM_KEY_VALUE' | translate
+                }}</mat-label>
+                <input
+                    #customInput
+                    matInput
+                    type="text"
+                    enterkeyhint="done"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    [attr.maxlength]="maxLength"
+                    [value]="customValue()"
+                    (input)="onCustomValueInput(customInput.value)"
+                />
+            </mat-form-field>
+            <button
+                mat-icon-button
+                type="submit"
+                [disabled]="customValue().trim() === ''"
+                [attr.aria-label]="'SHARED.ADD' | translate"
+            >
+                <mat-icon fontSet="material-symbols-rounded">add</mat-icon>
+            </button>
+        </form>
+    }
+</article>
