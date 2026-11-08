@@ -1,3 +1,35 @@
+/** Turns an editor-layer-index URL into the template MapLibre understands. */
+export function normalizeImageryUrl(url: string): string {
+    return url
+        .replaceAll('{zoom}', '{z}')
+        .replaceAll('{proj}', '3857')
+        .replaceAll('{wkid}', '3857')
+        .replaceAll('{height}', '256')
+        .replaceAll('{width}', '256')
+        .replaceAll('{bbox}', '{bbox-epsg-3857}')
+}
+
+const supportedPlaceholders = new Set([
+    'z',
+    'x',
+    'y',
+    '-y',
+    'bbox-epsg-3857',
+    'quadkey',
+])
+
+/**
+ * A tile template that cannot be used from the app: plain `http:` is blocked
+ * as mixed content on the https origins, and a placeholder that nothing
+ * substitutes would be requested literally.
+ */
+export function isUnusableTileTemplate(template: string): boolean {
+    if (!/^https:/i.test(template)) return true
+    return [...template.matchAll(/\{([^}]*)\}/g)].some(
+        ([, name]) => !supportedPlaceholders.has(name)
+    )
+}
+
 export function invertTmsY(y: number, z: number): number {
     return 2 ** z - y - 1
 }

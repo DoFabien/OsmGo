@@ -3,6 +3,8 @@ import {
     buildTileTestUrl,
     compareImageryPriority,
     invertTmsY,
+    isUnusableTileTemplate,
+    normalizeImageryUrl,
     simplifyRing,
     toImageryFeature,
 } from './basemap-utils'
@@ -83,3 +85,29 @@ assert.deepEqual(tmsLayer.properties, {
     attribution: { text: '© Test' },
 })
 assert.deepEqual(tmsLayer.geometry.coordinates[0][0], [1.1235, 2])
+
+assert.equal(
+    normalizeImageryUrl(
+        'https://tiles.test/export?bbox={bbox}&bboxSR={wkid}&imageSR={wkid}&size={width},{height}&proj={proj}&z={zoom}'
+    ),
+    'https://tiles.test/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&proj=3857&z={z}'
+)
+assert.equal(
+    isUnusableTileTemplate('https://tiles.test/{z}/{x}/{-y}.png'),
+    false
+)
+assert.equal(
+    isUnusableTileTemplate(
+        'https://tiles.test/wms?bbox={bbox-epsg-3857}&q={quadkey}'
+    ),
+    false
+)
+assert.equal(isUnusableTileTemplate('http://tiles.test/{z}/{x}/{y}.png'), true)
+assert.equal(
+    isUnusableTileTemplate('https://tiles.test/{z}/{x}/{y}?sr={wkid}'),
+    true
+)
+assert.equal(
+    isUnusableTileTemplate('https://tiles.test/{apikey}/{z}/{x}/{y}'),
+    true
+)

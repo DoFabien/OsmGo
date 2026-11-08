@@ -14,6 +14,8 @@ import { assetsDir } from './_paths'
 import {
     buildTileTestUrl,
     compareImageryPriority,
+    isUnusableTileTemplate,
+    normalizeImageryUrl,
     toImageryFeature,
 } from './basemap-utils'
 
@@ -149,12 +151,7 @@ const run = async () => {
             continue
         }
 
-        let furl = feature.properties.url
-        furl = furl.replace('{zoom}', '{z}')
-        furl = furl.replace('{proj}', '3857')
-        furl = furl.replace('{height}', '256')
-        furl = furl.replace('{width}', '256')
-        furl = furl.replace('{bbox}', '{bbox-epsg-3857}')
+        const furl = normalizeImageryUrl(feature.properties.url)
 
         // if {-y} => "scheme": "tms" ?
         feature.properties['tiles'] = []
@@ -208,6 +205,11 @@ const run = async () => {
 
         // zoom is too low for Osm Go
         if (feature.properties.max_zoom && feature.properties.max_zoom < 14) {
+            continue
+        }
+
+        // http (mixed content) or a placeholder that nothing substitutes
+        if (feature.properties.tiles.some(isUnusableTileTemplate)) {
             continue
         }
 
