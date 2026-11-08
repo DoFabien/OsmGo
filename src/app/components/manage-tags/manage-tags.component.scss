@@ -11,7 +11,9 @@
     width: min(100%, 920px);
     gap: 14px;
     margin: 0 auto;
-    padding: 16px 12px calc(32px + env(safe-area-inset-bottom));
+    padding: 16px max(12px, env(safe-area-inset-right))
+        calc(32px + env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
 }
 
 .tag-management-card {
@@ -43,7 +45,7 @@
 
 .card-icon--hidden {
     color: var(--osmgo-error);
-    background: #ffdad6;
+    background: var(--osmgo-error-container);
 }
 
 .card-icon--favorite {
@@ -74,7 +76,8 @@
 @media (min-width: 720px) {
     .manage-tags-content {
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        padding: 24px 20px 48px;
+        padding: 24px max(20px, env(safe-area-inset-right)) 48px
+            max(20px, env(safe-area-inset-left));
     }
 
     .tag-management-card {

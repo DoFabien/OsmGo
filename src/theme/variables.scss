@@ -1,28 +1,190 @@
+@use 'sass:list';
+
+// Single source of truth for the colour tokens: (light, dark) pairs, or one
+// value shared by both schemes.
+$colors: (
+    '--osmgo-blue': (
+        #1767c4,
+        #9fc6ff,
+    ),
+    '--osmgo-on-blue': (
+        #ffffff,
+        #002f65,
+    ),
+    '--osmgo-blue-strong': (
+        #0f55a6,
+        #bcd6ff,
+    ),
+    '--osmgo-blue-dark': (
+        #0a467f,
+        #d3e4ff,
+    ),
+    '--osmgo-blue-container': (
+        #e6f0ff,
+        #1f3a5c,
+    ),
+    '--osmgo-blue-outline': (
+        #bdd2ed,
+        #3d6189,
+    ),
+    '--osmgo-map-blue': (
+        #22709a,
+        #8fcdee,
+    ),
+    '--osmgo-header-surface': (
+        #1767c4,
+        #173f6c,
+    ),
+    '--osmgo-on-header': #ffffff,
+    '--osmgo-on-header-ripple': rgba(255, 255, 255, 0.24),
+    '--osmgo-icon-fill': #1767c4,
+    '--osmgo-marker-fallback': #26352f,
+    '--osmgo-amber': #ffad12,
+    '--osmgo-amber-container': (
+        #fff0c8,
+        #3d2e05,
+    ),
+    '--osmgo-amber-outline': (
+        #f1d28a,
+        #6e5310,
+    ),
+    '--osmgo-amber-ink': (
+        #654500,
+        #ffd88a,
+    ),
+    '--osmgo-on-amber': #2d2104,
+    '--osmgo-error': (
+        #ba1a1a,
+        #ffb4ab,
+    ),
+    '--osmgo-on-error': (
+        #ffffff,
+        #690005,
+    ),
+    '--osmgo-error-container': (
+        #ffdad6,
+        #5c1512,
+    ),
+    '--osmgo-on-error-container': (
+        #690005,
+        #ffdad6,
+    ),
+    '--osmgo-error-outline': (
+        #ffb4ab,
+        #8c2a22,
+    ),
+    '--osmgo-error-surface': (
+        #fff3f1,
+        #2c1715,
+    ),
+    '--osmgo-success': (
+        #276f3b,
+        #8cd8a0,
+    ),
+    '--osmgo-on-success': (
+        #ffffff,
+        #00391b,
+    ),
+    '--osmgo-success-container': (
+        #d8f5dd,
+        #1d4a2b,
+    ),
+    '--osmgo-surface': (
+        #fffefb,
+        #1c201c,
+    ),
+    '--osmgo-surface-muted': (
+        #f3f5f0,
+        #121512,
+    ),
+    '--osmgo-map-surface': (
+        #eef1eb,
+        #121512,
+    ),
+    '--osmgo-ink-strong': (
+        #1a1c1a,
+        #e2e6df,
+    ),
+    '--osmgo-ink-muted': (
+        #626761,
+        #b3bab1,
+    ),
+    '--osmgo-outline': (
+        #767d74,
+        #8b9389,
+    ),
+    '--osmgo-outline-soft': (
+        #bfc7bd,
+        #434a42,
+    ),
+    '--osmgo-divider': (
+        #dfe4dd,
+        #343a33,
+    ),
+    '--osmgo-scrim': (
+        rgba(22, 31, 27, 0.42),
+        rgba(0, 0, 0, 0.6),
+    ),
+    '--osmgo-scrim-soft': (
+        rgba(19, 36, 31, 0.28),
+        rgba(0, 0, 0, 0.5),
+    ),
+    '--osmgo-shadow': (
+        rgba(25, 42, 35, 0.12),
+        rgba(0, 0, 0, 0.5),
+    ),
+    '--osmgo-shadow-strong': (
+        rgba(30, 48, 43, 0.18),
+        rgba(0, 0, 0, 0.6),
+    ),
+    '--osmgo-elevation-ring': (
+        transparent,
+        rgba(255, 255, 255, 0.16),
+    ),
+    '--osmgo-backdrop': (
+        rgba(0, 0, 0, 0.32),
+        rgba(0, 0, 0, 0.64),
+    ),
+    '--mat-sys-on-primary-container': (
+        #0a335e,
+        #d7e3ff,
+    ),
+    '--mat-sys-tertiary': (
+        #8b6500,
+        #f5bf48,
+    ),
+);
+
+// Browsers without light-dark() (iOS 16, outdated WebViews) get the complete
+// light theme; the others follow the system colour scheme.
 :root {
     color-scheme: light;
 
+    @each $name, $value in $colors {
+        #{$name}: list.nth($value, 1);
+    }
+}
+
+@supports (color: light-dark(white, black)) {
+    :root {
+        color-scheme: light dark;
+
+        @each $name, $value in $colors {
+            @if list.length($value) == 2 {
+                #{$name}: light-dark(list.nth($value, 1), list.nth($value, 2));
+            }
+        }
+    }
+}
+
+:root {
     /** OsmGo design tokens — mobile-first map interface **/
-    --osmgo-blue: #1767c4;
-    --osmgo-blue-strong: #0f55a6;
-    --osmgo-blue-dark: #0a467f;
-    --osmgo-blue-container: #e6f0ff;
-    --osmgo-map-blue: #287ca9;
-    --osmgo-amber: #ffad12;
-    --osmgo-amber-container: #fff0c8;
-    --osmgo-amber-ink: #654500;
     --osmgo-amber-text: var(--osmgo-amber-ink);
-    --osmgo-on-amber: #2d2104;
-    --osmgo-error: #ba1a1a;
     --osmgo-danger: var(--osmgo-error);
-    --osmgo-surface: #fffefb;
-    --osmgo-surface-muted: #f3f5f0;
-    --osmgo-map-surface: #eef1eb;
-    --osmgo-ink-strong: #1a1c1a;
-    --osmgo-ink-muted: #626761;
     --osmgo-text-muted: var(--osmgo-ink-muted);
-    --osmgo-outline-soft: #bfc7bd;
-    --osmgo-divider: #dfe4dd;
-    --osmgo-map-control-shadow: 0 3px 12px rgba(30, 48, 43, 0.18);
+    --osmgo-map-control-shadow:
+        0 0 0 1px var(--osmgo-elevation-ring),
+        0 3px 12px var(--osmgo-shadow-strong);
     --osmgo-font-family: 'Source Sans 3 Variable', 'Segoe UI', sans-serif;
 
     --mat-sys-body-large-font: var(--osmgo-font-family);
@@ -42,15 +204,17 @@
     --mat-sys-title-small-font: var(--osmgo-font-family);
 
     --mat-sys-primary: var(--osmgo-blue);
-    --mat-sys-on-primary: #ffffff;
+    --mat-sys-on-primary: var(--osmgo-on-blue);
     --mat-sys-primary-container: var(--osmgo-blue-container);
-    --mat-sys-on-primary-container: #0a335e;
     --mat-sys-secondary: var(--osmgo-map-blue);
-    --mat-sys-tertiary: #8b6500;
     --mat-sys-error: var(--osmgo-error);
     --mat-sys-surface: var(--osmgo-surface);
     --mat-sys-on-surface: var(--osmgo-ink-strong);
-    --mat-sys-outline: var(--osmgo-outline-soft);
+    --mat-sys-outline: var(--osmgo-outline);
+
+    // Dark surfaces cannot rely on shadows to stand out from what they cover.
+    --mat-dialog-container-elevation-shadow: 0 0 0 1px
+        var(--osmgo-elevation-ring);
 }
 
 html,

@@ -11,7 +11,9 @@
     width: min(100%, 920px);
     gap: 16px;
     margin: 0 auto;
-    padding: 16px 12px calc(36px + env(safe-area-inset-bottom));
+    padding: 16px max(12px, env(safe-area-inset-right))
+        calc(36px + env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
 }
 
 .settings-section {
@@ -90,6 +92,10 @@
     }
 }
 
+.setting-copy .setting-warning {
+    color: var(--osmgo-error);
+}
+
 .setting-row--field {
     align-items: center;
 
@@ -105,6 +111,7 @@
 }
 
 .danger-action {
+    --mat-button-outlined-label-text-color: var(--osmgo-error);
     flex: 0 0 auto;
     color: var(--osmgo-error);
 }
@@ -130,6 +137,7 @@
 
 @media (min-width: 768px) {
     .settings-content {
-        padding: 24px 20px 48px;
+        padding: 24px max(20px, env(safe-area-inset-right)) 48px
+            max(20px, env(safe-area-inset-left));
     }
 }

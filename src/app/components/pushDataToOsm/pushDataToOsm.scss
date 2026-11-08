@@ -28,6 +28,56 @@
     border-radius: 16px;
 }
 
+.message-card--warning {
+    color: var(--osmgo-amber-ink);
+    background: var(--osmgo-amber-container);
+    flex-wrap: wrap;
+
+    p {
+        flex: 1 1 200px;
+        margin: 0;
+    }
+}
+
+.message-card--error {
+    flex-wrap: wrap;
+
+    p {
+        flex: 1 1 160px;
+    }
+}
+
+.message-action {
+    min-height: 48px;
+}
+
+.message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+}
+
+.error-hint {
+    margin: 12px 0 0;
+    font-size: 14px;
+}
+
+.rebase-conflict {
+    margin-top: 12px;
+    font-size: 14px;
+
+    p {
+        margin: 0 0 4px;
+        font-weight: 600;
+    }
+
+    ul {
+        margin: 0;
+        padding-left: 20px;
+    }
+}
+
 .environment-banner {
     color: var(--osmgo-amber-ink);
     font-weight: 700;
@@ -35,8 +85,8 @@
 }
 
 .message-card--error {
-    color: #7a0a0a;
-    background: #ffdad6;
+    color: var(--osmgo-on-error-container);
+    background: var(--osmgo-error-container);
 
     p {
         margin: 0;
@@ -77,7 +127,7 @@
 }
 
 .summary-create strong {
-    color: #276f3b;
+    color: var(--osmgo-success);
 }
 .summary-update strong {
     color: var(--osmgo-blue);
@@ -115,9 +165,9 @@
 }
 
 .upload-error {
-    border-color: #ffb4ab;
-    color: #690005;
-    background: #fff3f1;
+    border-color: var(--osmgo-error-outline);
+    color: var(--osmgo-on-error-container);
+    background: var(--osmgo-error-surface);
 
     header {
         color: var(--osmgo-error);
@@ -146,7 +196,7 @@
     min-width: 0;
     padding: 8px 10px;
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.62);
+    background: var(--osmgo-surface);
 }
 
 .recovery-context dt {
@@ -164,7 +214,7 @@
     display: grid;
     overflow: hidden;
     margin: 12px 0;
-    border: 1px solid #ffb4ab;
+    border: 1px solid var(--osmgo-error-outline);
     border-radius: 12px;
     background: var(--osmgo-surface);
 
@@ -202,11 +252,11 @@
 
     &[data-change-type='Delete'] .change-type {
         color: var(--osmgo-error);
-        background: #ffdad6;
+        background: var(--osmgo-error-container);
     }
     &[data-change-type='Create'] .change-type {
-        color: #276f3b;
-        background: #d8f5dd;
+        color: var(--osmgo-success);
+        background: var(--osmgo-success-container);
     }
 
     &[data-upload-locked='true'] {
@@ -295,7 +345,7 @@
     mat-icon {
         width: 42px;
         height: 42px;
-        color: #276f3b;
+        color: var(--osmgo-success);
         font-size: 42px;
     }
 }
@@ -312,7 +362,7 @@
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--osmgo-divider);
     background: var(--osmgo-surface);
-    box-shadow: 0 -4px 18px rgba(28, 44, 38, 0.1);
+    box-shadow: 0 -4px 18px var(--osmgo-shadow);
 
     button:last-child {
         flex: 1 1 auto;
@@ -323,7 +373,8 @@
 }
 
 .delete-all {
-    min-height: 32px;
+    --mat-button-text-label-text-color: var(--osmgo-error);
+    min-height: 48px;
     margin-left: auto;
     padding-inline: 8px;
     color: var(--osmgo-error);
@@ -361,7 +412,7 @@
 .upload-success mat-icon {
     width: 100px;
     height: 100px;
-    color: #276f3b;
+    color: var(--osmgo-success);
     font-size: 100px;
 }
 

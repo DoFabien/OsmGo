@@ -19,7 +19,7 @@
 
     &.is-destructive {
         color: var(--osmgo-error);
-        background: #ffdad6;
+        background: var(--osmgo-error-container);
     }
 }
 
@@ -31,6 +31,7 @@ h2 {
 mat-dialog-content {
     color: var(--osmgo-ink-muted);
     line-height: 1.45;
+    white-space: pre-line;
 }
 
 mat-dialog-actions {
@@ -39,6 +40,8 @@ mat-dialog-actions {
 }
 
 .danger-button {
-    color: #fff;
+    --mat-button-filled-label-text-color: var(--osmgo-on-error);
+    --mat-button-filled-container-color: var(--osmgo-error);
+    color: var(--osmgo-on-error);
     background: var(--osmgo-error);
 }

@@ -12,7 +12,7 @@
     width: 100%;
     padding: 0;
     border: 0;
-    background: rgba(22, 31, 27, 0.42);
+    background: var(--osmgo-scrim);
 }
 
 .menu-content {
@@ -25,7 +25,7 @@
     overflow: hidden;
     border-radius: 0 28px 28px 0;
     background: var(--osmgo-surface);
-    box-shadow: 8px 0 30px rgba(25, 41, 35, 0.2);
+    box-shadow: 8px 0 30px var(--osmgo-shadow-strong);
 }
 
 .menu-header {
@@ -34,8 +34,8 @@
     align-items: center;
     gap: 10px;
     padding: env(safe-area-inset-top) 12px 0 10px;
-    color: #fff;
-    background: var(--osmgo-blue);
+    color: var(--osmgo-on-header);
+    background: var(--osmgo-header-surface);
 
     h1 {
         display: inline;
@@ -51,8 +51,8 @@
 }
 
 .version {
-    margin-left: 8px;
-    color: #fff;
+    margin-inline-start: 8px;
+    color: var(--osmgo-on-header);
     font-size: 12px;
     font-weight: 650;
 }
@@ -107,7 +107,7 @@
         gap: 14px;
         border-radius: 14px;
         color: var(--osmgo-ink-strong);
-        text-align: left;
+        text-align: start;
     }
 
     mat-icon {
@@ -151,6 +151,7 @@
 }
 
 .delete-button {
+    --mat-button-text-label-text-color: var(--osmgo-error);
     color: var(--osmgo-error);
 }
 

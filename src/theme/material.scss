@@ -1,0 +1,39 @@
+@use 'sass:map';
+@use '@angular/material' as mat;
+
+// Same palettes as the former prebuilt azure-blue theme. The light theme is
+// the fallback for browsers without light-dark().
+$palettes: (
+    primary: mat.$azure-palette,
+    tertiary: mat.$blue-palette,
+);
+
+html {
+    @include mat.theme(
+        (
+            color: map.merge(
+                    $palettes,
+                    (
+                        theme-type: light,
+                    )
+                ),
+            typography: Roboto,
+            density: 0,
+        )
+    );
+}
+
+@supports (color: light-dark(white, black)) {
+    html {
+        @include mat.theme(
+            (
+                color: map.merge(
+                        $palettes,
+                        (
+                            theme-type: color-scheme,
+                        )
+                    ),
+            )
+        );
+    }
+}

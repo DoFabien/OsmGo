@@ -9,7 +9,9 @@
 .basemaps-content {
     width: min(100%, 920px);
     margin: 0 auto;
-    padding: 18px 16px calc(32px + env(safe-area-inset-bottom));
+    padding: 18px max(16px, env(safe-area-inset-right))
+        calc(32px + env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
 }
 
 .screen-intro {
@@ -21,6 +23,9 @@
 .basemap-grid {
     display: grid;
     gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 .basemap-card {
@@ -31,7 +36,7 @@
     border: 1px solid var(--osmgo-divider);
     border-radius: 18px;
     color: var(--osmgo-ink-strong);
-    text-align: left;
+    text-align: start;
     background: var(--osmgo-surface);
     cursor: pointer;
 
@@ -74,6 +79,14 @@
     display: grid;
     min-height: 240px;
     place-items: center;
+    align-content: center;
+    gap: 14px;
+    color: var(--osmgo-ink-muted);
+    text-align: center;
+
+    p {
+        margin: 0;
+    }
 }
 
 @media (min-width: 720px) {

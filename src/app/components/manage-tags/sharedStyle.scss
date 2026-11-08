@@ -12,7 +12,8 @@
 }
 
 .tag-dialog__search {
-    padding: 14px 12px 8px;
+    padding: 14px max(12px, env(safe-area-inset-right)) 8px
+        max(12px, env(safe-area-inset-left));
     background: var(--osmgo-surface);
 
     mat-form-field {
@@ -22,10 +23,12 @@
 
 .tag-dialog__list {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     align-content: start;
     gap: 8px;
     overflow-y: auto;
-    padding: 10px 12px 20px;
+    padding: 10px max(12px, env(safe-area-inset-right)) 20px
+        max(12px, env(safe-area-inset-left));
     overscroll-behavior: contain;
 }
 
@@ -54,7 +57,9 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    padding: 10px max(12px, env(safe-area-inset-right))
+        calc(10px + env(safe-area-inset-bottom))
+        max(12px, env(safe-area-inset-left));
     border-top: 1px solid var(--osmgo-divider);
     background: var(--osmgo-surface);
 }
@@ -68,6 +73,7 @@
 }
 
 .danger-action {
+    --mat-button-text-label-text-color: var(--osmgo-error);
     color: var(--osmgo-error);
 }
 
@@ -75,6 +81,11 @@
     .tag-dialog__search,
     .tag-dialog__list,
     .tag-dialog__footer {
-        padding-inline: max(20px, calc((100vw - 860px) / 2));
+        padding-inline: max(
+                20px,
+                env(safe-area-inset-left),
+                calc((100vw - 860px) / 2)
+            )
+            max(20px, env(safe-area-inset-right), calc((100vw - 860px) / 2));
     }
 }

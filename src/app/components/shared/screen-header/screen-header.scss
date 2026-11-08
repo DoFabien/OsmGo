@@ -9,14 +9,22 @@
     min-height: 56px;
     gap: 10px;
     padding: 0 10px;
-    color: #fff;
-    background: var(--osmgo-blue);
-    box-shadow: 0 2px 10px rgba(20, 50, 44, 0.14);
+    color: var(--osmgo-on-header);
+    background: var(--osmgo-header-surface);
+    box-shadow: 0 2px 10px var(--osmgo-shadow);
+
+    // Icon buttons default to the neutral on-surface colour, which is nearly
+    // invisible on the blue toolbar.
+    --mat-icon-button-icon-color: var(--osmgo-on-header);
+    --mat-icon-button-state-layer-color: var(--osmgo-on-header);
+    --mat-icon-button-ripple-color: var(--osmgo-on-header-ripple);
 }
 
 .screen-toolbar--safe-area {
     min-height: calc(56px + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
+    padding-inline: max(10px, env(safe-area-inset-left))
+        max(10px, env(safe-area-inset-right));
 }
 
 h1 {
@@ -33,5 +41,10 @@ h1 {
 @media (min-width: 768px) {
     .screen-toolbar {
         padding-inline: 18px;
+    }
+
+    .screen-toolbar--safe-area {
+        padding-inline: max(18px, env(safe-area-inset-left))
+            max(18px, env(safe-area-inset-right));
     }
 }

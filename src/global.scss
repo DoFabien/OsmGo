@@ -49,6 +49,10 @@ button.mat-mdc-icon-button.mat-mdc-button-base {
     }
 }
 
+.cdk-overlay-container .cdk-overlay-dark-backdrop {
+    background: var(--osmgo-backdrop);
+}
+
 .positionMarkersSize {
     width: 64px;
     height: 64px;

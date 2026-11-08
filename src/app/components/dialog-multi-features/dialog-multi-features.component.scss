@@ -107,7 +107,7 @@ mat-dialog-content {
 
     &[data-change-type='Delete'] {
         color: var(--osmgo-error);
-        background: #ffdad6;
+        background: var(--osmgo-error-container);
     }
 }
 

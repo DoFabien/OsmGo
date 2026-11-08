@@ -13,7 +13,9 @@
 .about-content {
     width: min(100%, 720px);
     margin: 0 auto;
-    padding: 20px 16px calc(32px + env(safe-area-inset-bottom));
+    padding: 20px max(16px, env(safe-area-inset-right))
+        calc(32px + env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
 }
 
 .brand-card {
@@ -57,5 +59,12 @@
 
     mat-icon[matListItemIcon] {
         color: var(--osmgo-map-blue);
+    }
+
+    // The trailing slot applies the list text font, which hides the ligature.
+    mat-icon[matListItemMeta] {
+        font-family: 'Material Symbols Rounded';
+        font-size: 24px;
+        line-height: 1;
     }
 }
