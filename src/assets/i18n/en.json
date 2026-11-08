@@ -71,6 +71,12 @@
         "SELECTION": {
             "SELECTED_OBJECT": "Selected object",
             "RESIZE_PANEL": "Resize panel",
+            "STACK": {
+                "LABEL": "Objects at this spot",
+                "PREVIOUS": "Previous object",
+                "NEXT": "Next object",
+                "LIST": "Show all objects at this spot"
+            },
             "EXPAND_PANEL": "Expand object sheet",
             "REDUCE_PANEL": "Reduce object sheet",
             "ADD_BOOKMARK": "Add bookmark",
@@ -253,6 +259,8 @@
         "SWITCH_SERVER_TITLE": "Switch OpenStreetMap server?",
         "CENTER_WHEN_GPS_IS_READY": "On start, center the map on your location",
         "CENTER_WHEN_GPS_IS_READY_HINT": "Center the map on your location as soon as possible.",
+        "OPEN_OBJECT_SHEET_AS_PREVIEW": "Open objects as a preview",
+        "OPEN_OBJECT_SHEET_AS_PREVIEW_HINT": "Opens the object sheet halfway so the map stays visible. Otherwise it opens full screen.",
         "LIMIT_FEATURES": "Maximum number of objects in memory",
         "LIMIT_FEATURES_HINT": "After this limit, the old data will be deleted (the current modifications will be kept). Too high a limit can dramatically decrease performance",
         "DISPLAY_SURVEY_CARD": "Show the survey card",

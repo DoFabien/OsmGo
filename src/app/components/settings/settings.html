@@ -56,6 +56,24 @@
                 ></mat-slide-toggle>
             </div>
 
+            <div class="setting-row">
+                <div class="setting-copy">
+                    <h3>
+                        {{ 'SETTINGS.OPEN_OBJECT_SHEET_AS_PREVIEW' | translate
+                        }}
+                    </h3>
+                    <p>
+                        {{ 'SETTINGS.OPEN_OBJECT_SHEET_AS_PREVIEW_HINT' |
+                        translate }}
+                    </p>
+                </div>
+                <mat-slide-toggle
+                    [attr.aria-label]="'SETTINGS.OPEN_OBJECT_SHEET_AS_PREVIEW' | translate"
+                    [checked]="configService.config().openObjectSheetAsPreview"
+                    (change)="openObjectSheetAsPreviewChange($event.checked)"
+                ></mat-slide-toggle>
+            </div>
+
             <div class="setting-row setting-row--stacked">
                 <div class="setting-row__heading">
                     <div class="setting-copy">

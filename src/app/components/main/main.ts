@@ -45,7 +45,7 @@ import { OsmApiService } from '@services/osmApi.service'
 import { OverlayNavigationService } from '@services/overlay-navigation.service'
 import { TagsService } from '@services/tags.service'
 import type { BBox } from 'geojson'
-import { LngLat } from 'maplibre-gl'
+import { LngLat, type MapGeoJSONFeature } from 'maplibre-gl'
 import { EMPTY, from, type Observable, take, timer } from 'rxjs'
 import { catchError, filter, finalize, map, switchMap } from 'rxjs/operators'
 import { MapControlsComponent } from './map-controls/map-controls'
@@ -105,6 +105,16 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         this.mapService.markerMoveMoving() ? null : this.selectedFeature()
     )
     readonly sheetLevel = signal<ObjectSheetLevel>('medium')
+    private readonly stackedFeatures = signal<{
+        features: MapGeoJSONFeature[]
+        index: number
+    } | null>(null)
+    private browsingStack = false
+    readonly stackNavigation = computed(() => {
+        const stack = this.stackedFeatures()
+        if (!stack || this.selectedFeature()?.type !== 'Read') return null
+        return { index: stack.index, count: stack.features.length }
+    })
     readonly mapControlsBottom = computed(() => {
         if (
             this.mapService.markerMoving() ||
@@ -167,28 +177,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 ) {
                     return
                 }
-                const dialogRef = this.dialog.open(
-                    DialogMultiFeaturesComponent,
-                    {
-                        autoFocus: 'dialog',
-                        maxWidth: 'calc(100vw - 24px)',
-                        panelClass: [
-                            'osmgo-dialog',
-                            'osmgo-feature-choice-dialog',
-                        ],
-                    }
-                )
-                dialogRef.componentRef?.setInput('features', features)
-                dialogRef.componentRef?.setInput(
-                    'jsonSprites',
-                    this.tagsService.jsonSprites()
-                )
-
-                dialogRef.afterClosed().subscribe((feature) => {
-                    if (feature) {
-                        this.mapService.selectFeature(feature)
-                    }
-                })
+                this.openFeatureChoice(features)
             })
 
         this.mapService.mapBackgroundClick$
@@ -215,12 +204,19 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 } else if (_data.type === 'Create' || _data.type === 'Read') {
                     this.readBeforeEdit.set(null)
                 }
+                const browsingStack = this.browsingStack
+                this.browsingStack = false
+                if (!this.isCurrentStackedFeature(_data)) {
+                    this.stackedFeatures.set(null)
+                }
                 this.selectedFeature.set(_data)
-                this.sheetLevel.set(
-                    _data.type === 'Read' && !_data.newPosition
-                        ? 'medium'
-                        : 'expanded'
-                )
+                if (!browsingStack) {
+                    this.sheetLevel.set(
+                        _data.type === 'Read' && !_data.newPosition
+                            ? this.readSheetLevel()
+                            : 'expanded'
+                    )
+                }
             })
 
         this.alertService.newAlert$
@@ -464,6 +460,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     closeSelection(): void {
         this.selectedFeature.set(null)
         this.readBeforeEdit.set(null)
+        this.stackedFeatures.set(null)
         this.sheetLevel.set('medium')
         void this.router.navigate([], {
             replaceUrl: true,
@@ -484,6 +481,62 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
             })
             this.sheetLevel.set('expanded')
         }
+    }
+
+    openFeatureChoice(features: MapGeoJSONFeature[]): void {
+        const dialogRef = this.dialog.open(DialogMultiFeaturesComponent, {
+            autoFocus: 'dialog',
+            maxWidth: 'calc(100vw - 24px)',
+            panelClass: ['osmgo-dialog', 'osmgo-feature-choice-dialog'],
+        })
+        dialogRef.componentRef?.setInput('features', features)
+        dialogRef.componentRef?.setInput(
+            'jsonSprites',
+            this.tagsService.jsonSprites()
+        )
+
+        dialogRef.afterClosed().subscribe((feature) => {
+            if (feature) {
+                this.stackedFeatures.set({
+                    features,
+                    index: features.indexOf(feature),
+                })
+                this.mapService.selectFeature(feature)
+            }
+        })
+    }
+
+    openStackedFeatureChoice(): void {
+        const stack = this.stackedFeatures()
+        if (stack) this.openFeatureChoice(stack.features)
+    }
+
+    showStackedFeature(step: -1 | 1): void {
+        const stack = this.stackedFeatures()
+        if (!stack) return
+        const count = stack.features.length
+        const index = (stack.index + step + count) % count
+        this.stackedFeatures.set({ ...stack, index })
+        this.browsingStack = true
+        this.mapService.selectFeature(stack.features[index])
+        this.browsingStack = false
+    }
+
+    private isCurrentStackedFeature(data: EventShowModal): boolean {
+        const stack = this.stackedFeatures()
+        if (!stack) return false
+        const feature = stack.features[stack.index]
+        return (
+            feature !== undefined &&
+            data.geojson.id ===
+                `${feature.properties['type']}/${feature.properties['id']}`
+        )
+    }
+
+    private readSheetLevel(): ObjectSheetLevel {
+        return this.configService.config().openObjectSheetAsPreview
+            ? 'medium'
+            : 'expanded'
     }
 
     startAddingObject(): void {
@@ -518,7 +571,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                     geojson: data.geojson,
                     origineData: data.origineData ?? 'data_changed',
                 })
-                this.sheetLevel.set('medium')
+                this.sheetLevel.set(this.readSheetLevel())
             }
         } else if (data.type === 'Cancel') {
             const previousRead = this.readBeforeEdit()
@@ -526,7 +579,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 previousRead ?? { ...selection, type: 'Read' }
             )
             this.readBeforeEdit.set(null)
-            this.sheetLevel.set('medium')
+            this.sheetLevel.set(this.readSheetLevel())
         }
 
         if (data.redraw) {

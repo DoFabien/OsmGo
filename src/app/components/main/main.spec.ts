@@ -69,6 +69,7 @@ const createPage = ({
     }
     const resolvedConfigService = {
         freezeMapRenderer: false,
+        config: () => ({ openObjectSheetAsPreview: false }),
         ...configService,
     }
     const router = { events: new Subject(), navigate: vi.fn() }
@@ -78,7 +79,7 @@ const createPage = ({
             { provide: MatDialog, useValue: modalCtrl },
             { provide: MatSnackBar, useValue: {} },
             { provide: OsmApiService, useValue: osmApi },
-            { provide: TagsService, useValue: {} },
+            { provide: TagsService, useValue: { jsonSprites: () => ({}) } },
             { provide: MapService, useValue: resolvedMapService },
             { provide: DataService, useValue: dataService },
             { provide: LocationService, useValue: {} },
@@ -280,7 +281,7 @@ describe('MainPage', () => {
         expect(modalCtrl.open).not.toHaveBeenCalled()
     })
 
-    it('opens a read selection in the mobile bottom sheet', () => {
+    it('opens a read selection full screen in the mobile bottom sheet', () => {
         const showModal$ = new Subject<any>()
         const feature = { id: 'node/1' }
         const modalCtrl = { open: vi.fn() }
@@ -300,8 +301,137 @@ describe('MainPage', () => {
             geojson: feature,
             origineData: 'data',
         })
-        expect(page.sheetLevel()).toBe('medium')
+        expect(page.sheetLevel()).toBe('expanded')
         expect(modalCtrl.open).not.toHaveBeenCalled()
+    })
+
+    it('opens a read selection as a preview when the setting asks for it', () => {
+        const showModal$ = new Subject<any>()
+        const { page } = createPage({
+            mapService: { showModal$ },
+            configService: {
+                config: () => ({ openObjectSheetAsPreview: true }),
+            },
+        })
+
+        showModal$.next({
+            type: 'Read',
+            geojson: { id: 'node/1' },
+            origineData: 'data',
+        })
+
+        expect(page.sheetLevel()).toBe('medium')
+    })
+
+    describe('stacked features', () => {
+        const stackedFeatures = [
+            { properties: { type: 'node', id: 1 } },
+            { properties: { type: 'node', id: 2 } },
+            { properties: { type: 'way', id: 3 } },
+        ]
+
+        const createStackedPage = () => {
+            const showModal$ = new Subject<any>()
+            const featureChoiceRequested$ = new Subject<unknown>()
+            const afterClosed = new Subject<unknown>()
+            const modalCtrl = {
+                open: vi.fn(() => ({
+                    componentRef: { setInput: vi.fn() },
+                    afterClosed: () => afterClosed,
+                })),
+            }
+            const selectFeature = vi.fn((feature: any) =>
+                showModal$.next({
+                    type: 'Read',
+                    geojson: {
+                        id: `${feature.properties.type}/${feature.properties.id}`,
+                    },
+                    origineData: 'data',
+                })
+            )
+            const created = createPage({
+                modalCtrl,
+                mapService: {
+                    showModal$,
+                    featureChoiceRequested$,
+                    selectFeature,
+                },
+            })
+            featureChoiceRequested$.next(stackedFeatures)
+            return { ...created, modalCtrl, afterClosed, showModal$ }
+        }
+
+        it('keeps the choice dialog and enables browsing from the chosen object', () => {
+            const { page, modalCtrl, afterClosed } = createStackedPage()
+
+            expect(modalCtrl.open).toHaveBeenCalledOnce()
+            afterClosed.next(stackedFeatures[1])
+
+            expect(page.selectedFeature()?.geojson.id).toBe('node/2')
+            expect(page.stackNavigation()).toEqual({ index: 1, count: 3 })
+        })
+
+        it('browses neighbours in both directions and wraps around', () => {
+            const { page, afterClosed } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+
+            page.showStackedFeature(-1)
+            expect(page.selectedFeature()?.geojson.id).toBe('way/3')
+            expect(page.stackNavigation()).toEqual({ index: 2, count: 3 })
+
+            page.showStackedFeature(1)
+            expect(page.selectedFeature()?.geojson.id).toBe('node/1')
+        })
+
+        it('keeps the sheet level chosen by the user while browsing', () => {
+            const { page, afterClosed } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+            page.sheetLevel.set('medium')
+
+            page.showStackedFeature(1)
+
+            expect(page.sheetLevel()).toBe('medium')
+        })
+
+        it('forgets the stack when another object is selected', () => {
+            const { page, afterClosed, showModal$ } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+
+            showModal$.next({
+                type: 'Read',
+                geojson: { id: 'node/99' },
+                origineData: 'data',
+            })
+
+            expect(page.stackNavigation()).toBeNull()
+        })
+
+        it('forgets the stack when the sheet closes', () => {
+            const { page, afterClosed } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+
+            page.closeSelection()
+
+            expect(page.stackNavigation()).toBeNull()
+        })
+
+        it('hides the arrows while the stacked object is edited', () => {
+            const { page, afterClosed } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+
+            page.editSelectedFeature()
+
+            expect(page.stackNavigation()).toBeNull()
+        })
+
+        it('reopens the choice dialog from the counter', () => {
+            const { page, modalCtrl, afterClosed } = createStackedPage()
+            afterClosed.next(stackedFeatures[0])
+
+            page.openStackedFeatureChoice()
+
+            expect(modalCtrl.open).toHaveBeenCalledTimes(2)
+        })
     })
 
     it('hides the selected sheet while its marker is being moved', () => {
@@ -451,7 +581,7 @@ describe('MainPage', () => {
             geojson: updatedFeature,
             origineData: 'data_changed',
         })
-        expect(page.sheetLevel()).toBe('medium')
+        expect(page.sheetLevel()).toBe('expanded')
     })
 
     it('ignores map background clicks while editing', () => {

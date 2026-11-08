@@ -38,6 +38,9 @@
         #objectSheet
         [selection]="selection"
         [level]="sheetLevel()"
+        [stackPosition]="stackNavigation()"
+        (stackStepRequested)="showStackedFeature($event)"
+        (stackListRequested)="openStackedFeatureChoice()"
         (levelChange)="sheetLevel.set($event)"
         (closeRequested)="closeSelection()"
         (editRequested)="editSelectedFeature($event)"

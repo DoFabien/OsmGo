@@ -124,9 +124,14 @@ export class ObjectSheetComponent {
 
     readonly selection = input.required<EventShowModal>()
     readonly level = input<ObjectSheetLevel>('medium')
+    readonly stackPosition = input<{ index: number; count: number } | null>(
+        null
+    )
     readonly closeRequested = output<void>()
     readonly editRequested = output<OsmGoFeature | undefined>()
     readonly levelChange = output<ObjectSheetLevel>()
+    readonly stackStepRequested = output<-1 | 1>()
+    readonly stackListRequested = output<void>()
     readonly sessionCompleted = output<ModalDismissData>()
 
     readonly dragOffset = signal(0)

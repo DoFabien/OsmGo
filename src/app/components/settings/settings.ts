@@ -70,6 +70,10 @@ export class SettingsPage {
         this.configService.setCenterWhenGpsIsReady(checked)
     }
 
+    openObjectSheetAsPreviewChange(checked: boolean): void {
+        this.configService.setOpenObjectSheetAsPreview(checked)
+    }
+
     defaultPrimarykeyWindowsChange(value: 'lastTags' | 'bookmarks'): void {
         this.configService.setDefaultPrimarykeyWindows(value)
     }

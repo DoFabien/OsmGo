@@ -55,6 +55,48 @@
         <span aria-hidden="true"></span>
     </button>
 
+    @if (stackPosition(); as stack) {
+    <nav
+        class="stack-navigation"
+        [attr.aria-label]="'MAIN.SELECTION.STACK.LABEL' | translate"
+    >
+        <button
+            mat-icon-button
+            type="button"
+            data-testid="stack-previous"
+            [matTooltip]="'MAIN.SELECTION.STACK.PREVIOUS' | translate"
+            [attr.aria-label]="'MAIN.SELECTION.STACK.PREVIOUS' | translate"
+            (click)="stackStepRequested.emit(-1)"
+        >
+            <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
+                >chevron_left</mat-icon
+            >
+        </button>
+        <button
+            type="button"
+            class="stack-count"
+            data-testid="stack-count"
+            [matTooltip]="'MAIN.SELECTION.STACK.LIST' | translate"
+            [attr.aria-label]="'MAIN.SELECTION.STACK.LIST' | translate"
+            (click)="stackListRequested.emit()"
+        >
+            {{ stack.index + 1 }} / {{ stack.count }}
+        </button>
+        <button
+            mat-icon-button
+            type="button"
+            data-testid="stack-next"
+            [matTooltip]="'MAIN.SELECTION.STACK.NEXT' | translate"
+            [attr.aria-label]="'MAIN.SELECTION.STACK.NEXT' | translate"
+            (click)="stackStepRequested.emit(1)"
+        >
+            <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
+                >chevron_right</mat-icon
+            >
+        </button>
+    </nav>
+    }
+
     <div class="object-header-actions">
         <button
             mat-icon-button

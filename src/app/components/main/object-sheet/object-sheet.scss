@@ -186,6 +186,38 @@
     }
 }
 
+.stack-navigation {
+    position: absolute;
+    top: 0;
+    left: 8px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+
+    button {
+        color: var(--osmgo-ink-strong);
+    }
+
+    .stack-count {
+        min-width: 44px;
+        min-height: 40px;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        font: inherit;
+        font-size: 0.875rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        cursor: pointer;
+    }
+
+    .stack-count:hover,
+    .stack-count:focus-visible {
+        background: var(--osmgo-blue-container);
+    }
+}
+
 .sheet-content {
     display: grid;
     align-content: start;

@@ -71,6 +71,7 @@ export interface Config {
     passwordSaved: boolean
     lastView: { lng: number; lat: number; zoom: number; bearing: number }
     centerWhenGpsIsReady: boolean
+    openObjectSheetAsPreview: boolean
     limitFeatures: number
 }
 
@@ -171,6 +172,7 @@ export class ConfigService {
         passwordSaved: true,
         lastView: { lng: -0.127758, lat: 51.507351, zoom: 18, bearing: 0 }, // London
         centerWhenGpsIsReady: true,
+        openObjectSheetAsPreview: false,
         limitFeatures: 10000,
     })
     readonly config = this.configState.asReadonly()
@@ -588,6 +590,10 @@ export class ConfigService {
 
     setCenterWhenGpsIsReady(center: boolean): void {
         void this.updateConfig({ centerWhenGpsIsReady: center })
+    }
+
+    setOpenObjectSheetAsPreview(preview: boolean): void {
+        void this.updateConfig({ openObjectSheetAsPreview: preview })
     }
 
     setLastView(lastView: Config['lastView']): void {

@@ -356,6 +356,54 @@ describe('ObjectSheetComponent swipes', () => {
         expect(iconComponent.icon()).toBe('second-icon')
     })
 
+    it('shows no stack navigation for a single object', () => {
+        const fixture = TestBed.createComponent(ObjectSheetComponent)
+        fixture.componentRef.setInput(
+            'selection',
+            selectionWith(1, 'information', '#9d7178')
+        )
+        fixture.detectChanges()
+
+        expect(
+            fixture.nativeElement.querySelector('.stack-navigation')
+        ).toBeNull()
+    })
+
+    it('browses stacked objects from the header', () => {
+        const fixture = TestBed.createComponent(ObjectSheetComponent)
+        fixture.componentRef.setInput(
+            'selection',
+            selectionWith(1, 'information', '#9d7178')
+        )
+        fixture.componentRef.setInput('stackPosition', { index: 1, count: 3 })
+        fixture.detectChanges()
+        const steps: number[] = []
+        let listRequests = 0
+        fixture.componentInstance.stackStepRequested.subscribe((step) =>
+            steps.push(step)
+        )
+        fixture.componentInstance.stackListRequested.subscribe(
+            () => listRequests++
+        )
+        const element: HTMLElement = fixture.nativeElement
+        const count = element.querySelector<HTMLButtonElement>(
+            '[data-testid="stack-count"]'
+        )
+
+        expect(count?.textContent?.trim()).toBe('2 / 3')
+
+        element
+            .querySelector<HTMLButtonElement>('[data-testid="stack-previous"]')
+            ?.click()
+        element
+            .querySelector<HTMLButtonElement>('[data-testid="stack-next"]')
+            ?.click()
+        count?.click()
+
+        expect(steps).toEqual([-1, 1])
+        expect(listRequests).toBe(1)
+    })
+
     it('keeps the unified reading sheet when an expanded selection changes', () => {
         const fixture = TestBed.createComponent(ObjectSheetComponent)
         fixture.componentRef.setInput('level', 'expanded')

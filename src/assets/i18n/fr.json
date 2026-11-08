@@ -71,6 +71,12 @@
         "SELECTION": {
             "SELECTED_OBJECT": "Objet sélectionné",
             "RESIZE_PANEL": "Redimensionner le panneau",
+            "STACK": {
+                "LABEL": "Objets à cet endroit",
+                "PREVIOUS": "Objet précédent",
+                "NEXT": "Objet suivant",
+                "LIST": "Afficher tous les objets à cet endroit"
+            },
             "EXPAND_PANEL": "Déployer la fiche",
             "REDUCE_PANEL": "Réduire la fiche",
             "ADD_BOOKMARK": "Ajouter aux favoris",
@@ -253,6 +259,8 @@
         "SWITCH_SERVER_TITLE": "Changer de serveur OpenStreetMap ?",
         "CENTER_WHEN_GPS_IS_READY": "Au démarrage, centrer la carte sur votre position",
         "CENTER_WHEN_GPS_IS_READY_HINT": "Centre la carte sur votre position dès que c'est possible",
+        "OPEN_OBJECT_SHEET_AS_PREVIEW": "Ouvrir les objets en aperçu",
+        "OPEN_OBJECT_SHEET_AS_PREVIEW_HINT": "Ouvre la fiche à mi-hauteur pour garder la carte visible. Sinon, elle s'ouvre en plein écran.",
         "LIMIT_FEATURES": "Nombre maximum d'objets en mémoire",
         "LIMIT_FEATURES_HINT": "Après cette limite, les anciennes données seront supprimées (Les modifications en cours seront conservées). Une limite trop haute peut diminuer considérablement les performances",
         "DISPLAY_SURVEY_CARD": "Afficher la survey card",
