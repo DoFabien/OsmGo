@@ -7,29 +7,68 @@
 </head>
 <body>
     <h1>Osm Go! App Privacy Policy</h1>
-    <p>We value your trust in using our Osm Go! application and are committed to protecting your privacy. This privacy policy explains how we handle your personal information:</p>
-    
-    <h2>Data Collection and Usage:</h2>
+    <p><a href="#fr">Version française</a></p>
+    <p>Osm Go! is a free, open-source application for contributing to <a href="https://www.openstreetmap.org">OpenStreetMap</a>. It has no user account of its own, no analytics, no advertising and no tracking. This policy explains which data the app uses, where it is stored and which third parties receive requests from it.</p>
+
+    <h2>Location</h2>
     <ul>
-        <li>The Osm Go! app uses your device's location feature solely to display your real-time location on the map.</li>
-        <li>No location data is stored, recorded, or shared with any third parties.</li>
+        <li>The app asks for your device's location (coarse and fine) to show your position on the map and to centre the map on it. Your position is processed on your device only; it is never sent to us.</li>
+        <li>The area visible on the map (not your exact position) is used to request map data and map tiles. The last map view is kept on your device so the app reopens where you left it.</li>
     </ul>
-    
-    <h2>Data Sharing:</h2>
+
+    <h2>Data stored on your device</h2>
     <ul>
-        <li>Your location is never shared with other users, entities, or third-party services.</li>
-        <li>We do not transmit any personal data to external servers.</li>
+        <li>Settings, favourite tags, the OpenStreetMap data you downloaded, your edits that are not uploaded yet, and your OpenStreetMap access token are stored locally in the app's storage. They are not sent anywhere except as described below.</li>
+        <li>You can remove all of this at any time with Settings &gt; Delete all application cache, or by uninstalling the app. Signing out removes the access token.</li>
     </ul>
-    
-    <h2>Data Security:</h2>
-    <p>We take appropriate security measures to safeguard your location data and ensure its confidentiality.</p>
-    
-    <h2>Privacy Policy Updates:</h2>
-    <p>Any future updates to our privacy policy will be clearly communicated on our <a href="https://github.com/DoFabien/OsmGo">GitHub page</a> to keep you informed.</p>
-    
-    <h2>Contact:</h2>
-    <p>If you have questions about our privacy policy or need to reach out regarding concerns about your data, please feel free to open an issue on our <a href="https://github.com/DoFabien/OsmGo">GitHub repository</a> under the dedicated issues section.</p>
-    
-    <p>We appreciate your usage of Osm Go! and are committed to ensuring the privacy and security of your data throughout your usage experience.</p>
+
+    <h2>Third parties that receive requests</h2>
+    <ul>
+        <li><strong>OpenStreetMap (OpenStreetMap Foundation)</strong>: signing in uses OpenStreetMap OAuth 2.0 on openstreetmap.org (the app never sees your password). The app downloads map data for the visible area from the OpenStreetMap API and, when you upload, sends your edits. Uploaded edits are published under your OpenStreetMap username and are public. Each changeset includes the text of your comment, the app name and version with the platform, your browser or device language (<code>locale</code>) and <code>source=survey</code>. Their handling of data is governed by the <a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap Foundation privacy policy</a>. Edits already published cannot be deleted by this app.</li>
+        <li><strong>Map tile providers</strong>: the default map background is vector tiles served by OpenFreeMap (openfreemap.org). If you switch to aerial imagery, tiles come from the provider you choose in the app (for example Microsoft Bing Maps, IGN or other providers listed in the OpenStreetMap Editor Layer Index). These providers receive your IP address and the tile coordinates of the area you look at, and handle them under their own privacy policies.</li>
+    </ul>
+    <p>We do not sell or share your data with anyone else, and we do not run any server that collects your data.</p>
+
+    <h2>Security</h2>
+    <p>Requests to OpenStreetMap and to the default map background use HTTPS. Your OpenStreetMap access token is kept in the app's private storage on your device.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>Updates will be published on our <a href="https://github.com/DoFabien/OsmGo">GitHub page</a>.</p>
+
+    <h2>Contact</h2>
+    <p>For any question about privacy, please open an issue on our <a href="https://github.com/DoFabien/OsmGo/issues">GitHub repository</a>.</p>
+
+    <hr>
+
+    <h1 id="fr">Osm Go! — Politique de confidentialité</h1>
+    <p>Osm Go! est une application libre et gratuite pour contribuer à <a href="https://www.openstreetmap.org">OpenStreetMap</a>. Elle n'a pas de compte utilisateur propre, ni statistiques d'usage, ni publicité, ni pistage. Cette politique explique quelles données l'application utilise, où elles sont stockées et quels tiers reçoivent des requêtes.</p>
+
+    <h2>Position</h2>
+    <ul>
+        <li>L'application demande la position de l'appareil (approximative et précise) pour afficher votre position sur la carte et y centrer la carte. Votre position est traitée uniquement sur votre appareil ; elle ne nous est jamais envoyée.</li>
+        <li>La zone visible sur la carte (et non votre position exacte) sert à demander les données et les tuiles de la carte. La dernière vue de la carte est conservée sur votre appareil pour rouvrir l'application là où vous l'avez laissée.</li>
+    </ul>
+
+    <h2>Données stockées sur votre appareil</h2>
+    <ul>
+        <li>Les réglages, les tags favoris, les données OpenStreetMap téléchargées, vos modifications pas encore envoyées et votre jeton d'accès OpenStreetMap sont stockés localement dans l'application. Ils ne sont envoyés nulle part ailleurs que comme décrit ci-dessous.</li>
+        <li>Vous pouvez tout supprimer à tout moment avec Paramètres &gt; Supprimer tout le cache de l'application, ou en désinstallant l'application. La déconnexion supprime le jeton d'accès.</li>
+    </ul>
+
+    <h2>Tiers qui reçoivent des requêtes</h2>
+    <ul>
+        <li><strong>OpenStreetMap (Fondation OpenStreetMap)</strong> : la connexion utilise OAuth 2.0 sur openstreetmap.org (l'application ne voit jamais votre mot de passe). L'application télécharge les données de la zone visible depuis l'API OpenStreetMap et, lorsque vous envoyez vos modifications, les transmet. Les modifications envoyées sont publiées sous votre nom d'utilisateur OpenStreetMap et sont publiques. Chaque ensemble de modifications (changeset) contient votre commentaire, le nom et la version de l'application avec la plateforme, la langue du navigateur ou de l'appareil (<code>locale</code>) et <code>source=survey</code>. Leur traitement des données relève de la <a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy">politique de confidentialité de la Fondation OpenStreetMap</a>. L'application ne peut pas supprimer des modifications déjà publiées.</li>
+        <li><strong>Fournisseurs de tuiles</strong> : le fond de carte par défaut est composé de tuiles vectorielles servies par OpenFreeMap (openfreemap.org). Si vous passez à l'imagerie aérienne, les tuiles viennent du fournisseur que vous choisissez dans l'application (par exemple Microsoft Bing Maps, l'IGN ou d'autres fournisseurs de l'Editor Layer Index d'OpenStreetMap). Ces fournisseurs reçoivent votre adresse IP et les coordonnées des tuiles de la zone regardée, et les traitent selon leur propre politique.</li>
+    </ul>
+    <p>Nous ne vendons ni ne partageons vos données avec d'autres, et nous n'exploitons aucun serveur qui collecte vos données.</p>
+
+    <h2>Sécurité</h2>
+    <p>Les requêtes vers OpenStreetMap et vers le fond de carte par défaut utilisent HTTPS. Votre jeton d'accès OpenStreetMap est conservé dans le stockage privé de l'application sur votre appareil.</p>
+
+    <h2>Modifications de cette politique</h2>
+    <p>Les mises à jour seront publiées sur notre <a href="https://github.com/DoFabien/OsmGo">page GitHub</a>.</p>
+
+    <h2>Contact</h2>
+    <p>Pour toute question sur la confidentialité, ouvrez un ticket sur notre <a href="https://github.com/DoFabien/OsmGo/issues">dépôt GitHub</a>.</p>
 </body>
 </html>

@@ -12,7 +12,7 @@ With OsmGo you can:
 
 - Create/Update/Delete POI mapped as OpenStreetMap nodes
 - Create/Update/Delete some way/area objects filtered to keep the most 'usefull' ones
-- Use differents imageries: BDOrtho IGN, MapBox Satellite & Bing aerial imagery
+- Use different imageries: BD ORTHO IGN, Bing aerial imagery and many others
 
 # Interface
 
@@ -23,7 +23,7 @@ With OsmGo you can:
 3. Add an object
 4. Show your location
 
-Changing map backgroung from MapBox tiles to aerial imagery:
+Changing the map background from the OpenFreeMap vector map to aerial imagery:
 
 <p align="center">
   <img src="./assets/map-vt.png"/>
