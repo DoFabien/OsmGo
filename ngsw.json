@@ -1,6 +1,6 @@
 {
   "configVersion": 1,
-  "timestamp": 1720189208816,
+  "timestamp": 1794173330075,
   "index": "/OsmGo/index.html",
   "assetGroups": [
     {
@@ -133,7 +133,7 @@
         "/OsmGo/assets/ionicons/ionicons_save.svg",
         "/OsmGo/common.f1388ada2f736541.js",
         "/OsmGo/index.html",
-        "/OsmGo/main.41206be970a1841a.js",
+        "/OsmGo/main.73f7bcf89b2dcee9.js",
         "/OsmGo/marker-moveX2.a2393bd60382269d.png",
         "/OsmGo/polyfills-core-js.e9b3457756bc2ca9.js",
         "/OsmGo/polyfills-dom.516ff539260f3e0d.js",
@@ -1902,8 +1902,8 @@
     "/OsmGo/assets/tagsAndPresets/tags.json": "9dea6512780e08d80cbe85a82a3a6ca6c3658b23",
     "/OsmGo/assets/workers/worker-formatOsmData.js": "0d42530a83a5cfdb46c01ab93d868bfdfd24edcd",
     "/OsmGo/common.f1388ada2f736541.js": "e04fbee4a09d48c1c511846ccbbd806ab53b331d",
-    "/OsmGo/index.html": "8b7105e7eaed804bc48ef3bfbfdafe0fde00fe0e",
-    "/OsmGo/main.41206be970a1841a.js": "3e5db5d303a73d60e6567ed131380e392301e137",
+    "/OsmGo/index.html": "5d1904d5692badd597160f1b69d4efc346fdeafc",
+    "/OsmGo/main.73f7bcf89b2dcee9.js": "27ea5e247a6d0737b58b2bd21e1a91ff1e2bb318",
     "/OsmGo/manifest.webmanifest": "321ac44eb8a155e8d7cbc62e5f771027282076ce",
     "/OsmGo/marker-moveX2.a2393bd60382269d.png": "86e64d43ca116103a3a2656131a3d40edab3808a",
     "/OsmGo/polyfills-core-js.e9b3457756bc2ca9.js": "95ab63a6e52c9c763bb5e4819e6856786bb45117",
