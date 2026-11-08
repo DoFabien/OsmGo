@@ -22,9 +22,12 @@
           "/manifest.webmanifest",
           "/media/**"
         ]
+      },
+      "cacheQueryOptions": {
+        "ignoreVary": true,
+        "ignoreSearch": true
       }
     },
-
     {
       "name": "assets",
       "installMode": "lazy",
@@ -41,14 +44,8 @@
     {
       "name": "map-tiles-previously-viewed",
       "urls": [
-        "https://a.tiles.mapbox.com/**",
-        "https://b.tiles.mapbox.com/**",
-        "https://c.tiles.mapbox.com/**",
-
-        "https://api.mapbox.com/v4/**",
-
-        "https://wxs.ign.fr/pratique/geoportail/**",
-
+        "https://tiles.openfreemap.org/planet/**",
+        "https://data.geopf.fr/tms/1.0.0/ORTHOIMAGERY.ORTHOPHOTOS/**",
         "https://ecn.t0.tiles.virtualearth.net/**",
         "https://ecn.t1.tiles.virtualearth.net/**",
         "https://ecn.t2.tiles.virtualearth.net/**",
@@ -58,6 +55,16 @@
         "maxSize": 800,
         "maxAge": "15d",
         "strategy": "performance"
+      }
+    },
+    {
+      "name": "basemap-tilejson",
+      "urls": ["https://tiles.openfreemap.org/planet"],
+      "cacheConfig": {
+        "maxSize": 1,
+        "maxAge": "30d",
+        "timeout": "3s",
+        "strategy": "freshness"
       }
     }
   ]

@@ -8,7 +8,7 @@ import {
     provideCheckNoChangesConfig,
 } from '@angular/core'
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async'
-import { provideRouter } from '@angular/router'
+import { provideRouter, withRouterConfig } from '@angular/router'
 import { provideServiceWorker } from '@angular/service-worker'
 import { routes } from '@app/app.routes'
 import { Capacitor } from '@capacitor/core'
@@ -18,7 +18,10 @@ import { provideTranslateHttpLoader } from '@ngx-translate/http-loader'
 
 export const appConfig: ApplicationConfig = {
     providers: [
-        provideRouter(routes),
+        provideRouter(
+            routes,
+            withRouterConfig({ canceledNavigationResolution: 'computed' })
+        ),
         ...(environment.production
             ? []
             : [

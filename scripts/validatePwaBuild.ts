@@ -10,6 +10,7 @@ interface ServiceWorkerConfig {
     }>
     dataGroups?: Array<{
         name: string
+        urls: string[]
         cacheConfig: {
             strategy: string
             maxSize: number
@@ -20,6 +21,12 @@ interface ServiceWorkerConfig {
 
 interface GeneratedManifest {
     hashTable: Record<string, string>
+    assetGroups: Array<{
+        name: string
+        urls: string[]
+        cacheQueryOptions?: { ignoreSearch?: boolean }
+    }>
+    dataGroups: Array<{ name: string; patterns: string[] }>
 }
 
 const outputDirectory = path.join(rootDir, 'www')
@@ -39,6 +46,13 @@ for (const stalePath of ['/assets/osmtogeojson.js', '/svg/md-']) {
         `Stale service-worker path remains: ${stalePath}`
     )
 }
+
+const headersPath = path.join(outputDirectory, '_headers')
+assert.ok(
+    fs.existsSync(headersPath) &&
+        fs.readFileSync(headersPath, 'utf8').includes('frame-ancestors'),
+    'The build must include the Cloudflare Pages security headers'
+)
 
 const hasGlob = (filePath: string): boolean => /[*?!]/.test(filePath)
 for (const group of config.assetGroups) {
@@ -70,6 +84,37 @@ assert.deepEqual(tilePolicy?.cacheConfig, {
     maxAge: '15d',
     strategy: 'performance',
 })
+
+// The service worker routes a request to the first data group whose
+// (unanchored) pattern matches: check where real basemap URLs end up.
+const dataGroupOf = (url: string): string | undefined =>
+    generatedManifest.dataGroups.find((group) =>
+        group.patterns.some((pattern) => new RegExp(pattern).test(url))
+    )?.name
+assert.equal(
+    dataGroupOf(
+        'https://tiles.openfreemap.org/planet/20261101_080013_pt/14/8492/5872.pbf'
+    ),
+    'map-tiles-previously-viewed',
+    'OpenFreeMap tiles must be cached as previously viewed tiles'
+)
+assert.equal(
+    dataGroupOf('https://tiles.openfreemap.org/planet'),
+    'basemap-tilejson',
+    'The OpenFreeMap TileJSON must use its own freshness group'
+)
+
+// MapLibre loads its worker as maplibre-gl-worker.mjs?v=<version>: the
+// prefetched copy is only served offline when the query is ignored.
+const workerGroup = generatedManifest.assetGroups.find((group) =>
+    group.urls.includes('/maplibre-gl-worker.mjs')
+)
+assert.ok(workerGroup, 'The MapLibre worker must be prefetched')
+assert.equal(
+    workerGroup.cacheQueryOptions?.ignoreSearch,
+    true,
+    'The MapLibre worker is requested with a query string: ignoreSearch is required'
+)
 
 console.log(
     `PWA build valid: ${Object.keys(generatedManifest.hashTable).length} hashed files and an explicit previously-viewed tile policy.`

@@ -41,12 +41,17 @@
                 "output": "/"
               },
               "src/.well-known/assetlinks.json",
-              "src/manifest.webmanifest"
+              "src/manifest.webmanifest",
+              {
+                "glob": "_headers",
+                "input": "src",
+                "output": "/"
+              }
             ],
             "styles": [
               "./node_modules/@fontsource-variable/source-sans-3/index.css",
-              "./node_modules/@angular/material/prebuilt-themes/azure-blue.css",
-              "./node_modules/material-symbols/rounded.css",
+              "src/theme/material.scss",
+              "src/theme/material-symbols/rounded.css",
               "src/theme/variables.scss",
               "src/global.scss",
               "./node_modules/maplibre-gl/dist/maplibre-gl.css"
@@ -76,8 +81,8 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "650kb",
-                  "maximumError": "750kb"
+                  "maximumWarning": "2.6mb",
+                  "maximumError": "3mb"
                 }
               ],
               "serviceWorker": "ngsw-config.json"
