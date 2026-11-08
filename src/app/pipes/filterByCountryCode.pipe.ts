@@ -15,9 +15,12 @@ export class FilterByCountryCode {
 
         return items.filter(
             (item) =>
-                !item.countryCodes ||
-                item.countryCodes
-                    .map((code) => code.toUpperCase())
+                (!item.countryCodes ||
+                    item.countryCodes
+                        .map((code) => code.toUpperCase())
+                        .includes(countryCode)) &&
+                !item.excludeCountryCodes
+                    ?.map((code) => code.toUpperCase())
                     .includes(countryCode)
         )
     }

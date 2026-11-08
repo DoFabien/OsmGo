@@ -2,12 +2,18 @@
  * Update files tags.json & presets.json in folder tagsAndPresets
  */
 
+import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { PresetOption, TagConfig } from '@osmgo/type'
 import fs from 'fs'
-import stringify from 'json-stringify-pretty-compact'
-import { tapPresetsPath, tapTagsPath } from './_paths'
-import { readTapPresetsFromJson, readTapTagsFromJson } from './_utils'
+import { assetsDir, tapPresetsPath, tapTagsPath } from './_paths'
+import {
+    isUnsupportedField,
+    readTapPresetsFromJson,
+    readTapTagsFromJson,
+    stringifyCatalog,
+} from './_utils'
+import { getCountryCodes } from './nameSuggestionIndex'
 
 const tagConfig = readTapTagsFromJson()
 const tagsOsmgo = tagConfig.tags
@@ -33,14 +39,27 @@ const excludesPresets = [
     //'portable', to add?
     'post',
     //'real_fire-GB-IE', to add?
-    'recycling_accepts',
     //'ref', to add?
     //'ref/vatin', to add?
     //'visibility', to add?
     'level_semi',
 ]
 
+// iD describes schools, colleges... with education=* (amenity=school alone is
+// no longer offered by its search): the catalog needs that key
+for (const [requiredKey, afterKey] of [['education', 'amenity']]) {
+    if (!tagConfig.primaryKeys.includes(requiredKey)) {
+        const position = tagConfig.primaryKeys.indexOf(afterKey) + 1
+        tagConfig.primaryKeys.splice(position, 0, requiredKey)
+    }
+}
 const osmgoPkeys = tagConfig.primaryKeys
+const sprites: Record<string, unknown> = JSON.parse(
+    fs.readFileSync(
+        path.join(assetsDir, 'mapStyle', 'sprites', 'sprites.json'),
+        'utf8'
+    )
+)
 
 const getOsmGoMarkerColorFromTagRoot = (tagRoot) => {
     let result = [] // =>
@@ -62,10 +81,18 @@ const getOsmGoMarkerColorFromTagRoot = (tagRoot) => {
             maxCountColor = r
         }
     }
-    return maxCountColor.color || '{CHANGE_ME}'
+    return maxCountColor?.color
 }
 
+// A category of a new root (education=school) takes the colour of the root
+// that its addTags write too (amenity=school)
+const getMarkerColor = (tagRoot: string, addTags: Record<string, string>) =>
+    [tagRoot, ...Object.keys(addTags ?? {})]
+        .map(getOsmGoMarkerColorFromTagRoot)
+        .find(Boolean) ?? '#000000'
+
 const idTagFieldIds = new Set<string>()
+const searchableVotes = new Map<TagConfig, boolean[]>()
 
 const mergeFieldIds = (
     currentIds: Array<string> = [],
@@ -143,7 +170,11 @@ for (const iDid in tagsID) {
             console.log('missing preset', f)
             continue
         }
-        if (presetsID[f].type === 'typeCombo' || excludesPresets.includes(f)) {
+        if (
+            presetsID[f].type === 'typeCombo' ||
+            excludesPresets.includes(f) ||
+            isUnsupportedField(presetsID[f])
+        ) {
             continue
         }
 
@@ -155,7 +186,8 @@ for (const iDid in tagsID) {
         if (
             !presetsID[f] ||
             presetsID[f].type === 'typeCombo' ||
-            excludesPresets.includes(f)
+            excludesPresets.includes(f) ||
+            isUnsupportedField(presetsID[f])
         ) {
             continue
         }
@@ -171,6 +203,19 @@ for (const iDid in tagsID) {
     })
 
     const rootTag = iDid.split('/')[0]
+
+    // The Osm Go category that stands for this iD preset: same id first, then
+    // same tags (legacy ids and per-geometry iD presets share the tags).
+    const mappedTag = tagOsmgoById ?? currenOsmgoTag
+    if (mappedTag) {
+        searchableVotes.set(mappedTag, [
+            ...(searchableVotes.get(mappedTag) ?? []),
+            tagiD.searchable !== false,
+        ])
+        if (!mappedTag.iDRef || !tagsID[mappedTag.iDRef]) {
+            mappedTag.iDRef = iDid
+        }
+    }
 
     if (tagOsmgoById && !currenOsmgoTag) {
         // tag found by id, we can update tags
@@ -190,8 +235,9 @@ for (const iDid in tagsID) {
         const newTag = {
             id: iDid,
             tags: tagiD.tags,
-            icon: tagiD.icon || '',
-            markerColor: getOsmGoMarkerColorFromTagRoot(rootTag),
+            // an icon that is not a sprite yet is chosen by cleanTags
+            icon: sprites[tagiD.icon] ? tagiD.icon : '',
+            markerColor: getMarkerColor(rootTag, tagiD.addTags),
             presets: iDFields,
             moreFields: iDMoreFields,
             lbl: { en: tagiD.name },
@@ -202,9 +248,9 @@ for (const iDid in tagsID) {
         if (tagiD.terms) newTag['terms'] = { en: tagiD.terms.join(', ') }
         if (tagiD.addTags) newTag['addTags'] = tagiD.addTags
         if (tagiD.reference) newTag['reference'] = tagiD.reference
-        if (tagiD.searchable) newTag['searchable'] = tagiD.searchable
 
         tagsOsmgo.push(newTag)
+        searchableVotes.set(newTag, [tagiD.searchable !== false])
     } else if (tagOsmgoById) {
         // tag already exist in tags.json
         // we can update tags
@@ -215,8 +261,123 @@ for (const iDid in tagsID) {
             iDMoreFields
         )
     } else {
-        // tagOsmgoById is null. yes it can happen
-        console.log('tagOsmgoById is null for iDid=' + iDid)
+        // same tags as another category: only the geometries can add up
+        currenOsmgoTag.geometry = [
+            ...new Set([...currenOsmgoTag.geometry, ...tagiD.geometry]),
+        ]
+        // iD names the point a stop ("Bus Stop") and the line or area a
+        // platform: Osm Go mostly adds points, the point preset names the
+        // category and gives the tags it writes
+        const referencedTag = tagsID[currenOsmgoTag.iDRef]
+        if (
+            tagiD.searchable !== false &&
+            tagiD.geometry.includes('point') &&
+            !referencedTag?.geometry.includes('point')
+        ) {
+            console.log('point preset names', currenOsmgoTag.id, iDid)
+            currenOsmgoTag.iDRef = iDid
+            currenOsmgoTag.lbl = { en: tagiD.name }
+            currenOsmgoTag.terms = { en: (tagiD.terms ?? []).join(', ') }
+            if (tagiD.addTags) {
+                currenOsmgoTag.addTags = tagiD.addTags
+            } else {
+                delete currenOsmgoTag.addTags
+            }
+        }
+    }
+
+    // the addTags follow the iD preset that the category stands for
+    if (mappedTag?.iDRef === iDid && tagiD.addTags) {
+        mappedTag.addTags = tagiD.addTags
+    }
+}
+
+// iD ranks the presets that match an object by their matchScore (0.5 for a
+// building, 0.6 for a bare platform), so that `amenity=school` +
+// `building=yes` is a school. A category without an iD preset takes the score
+// that most iD presets of its key use.
+const matchScoreCounts = new Map<string, Map<number, number>>()
+for (const [iDid, tagiD] of Object.entries<{ matchScore?: number }>(tagsID)) {
+    if (!iDid.includes('/')) continue
+    const rootTag = iDid.split('/')[0]
+    const counts = matchScoreCounts.get(rootTag) ?? new Map<number, number>()
+    const score = tagiD.matchScore ?? 1
+    counts.set(score, (counts.get(score) ?? 0) + 1)
+    matchScoreCounts.set(rootTag, counts)
+}
+const getUsualMatchScore = (rootTag: string): number => {
+    let usual = 1
+    for (const [score, count] of matchScoreCounts.get(rootTag) ?? []) {
+        if (count > (matchScoreCounts.get(rootTag)?.get(usual) ?? 0)) {
+            usual = score
+        }
+    }
+    return usual
+}
+for (const tag of tagsOsmgo as Array<TagConfig & { matchScore?: number }>) {
+    const matchScore = tagsID[tag.iDRef]
+        ? (tagsID[tag.iDRef].matchScore ?? 1)
+        : getUsualMatchScore(tag.id.split('/')[0])
+    if (matchScore === 1) {
+        delete tag.matchScore
+    } else {
+        tag.matchScore = matchScore
+    }
+}
+
+// A category stays searchable while one of its iD presets is
+for (const [tag, votes] of searchableVotes) {
+    if (votes.some(Boolean)) {
+        delete tag.searchable
+    } else {
+        tag.searchable = false
+    }
+}
+
+// iD writes healthcare=* along with amenity=* (doctors, dentist, hospital): a
+// healthcare category of Osm Go alone that an iD category writes too is not
+// offered, the search gives the iD category, which writes both keys
+const COMPANION_KEYS = ['healthcare']
+const isIDCategory = (tag: TagConfig): boolean =>
+    Boolean(tagsID[tag.iDRef]) && !tag.deprecated && tag.searchable !== false
+for (const tag of tagsOsmgo) {
+    if (
+        tagsID[tag.iDRef] ||
+        tag.deprecated ||
+        !Object.keys(tag.tags).every((key) => COMPANION_KEYS.includes(key))
+    ) {
+        continue
+    }
+    const isWrittenByIDCategory = tagsOsmgo.some(
+        (other) =>
+            other !== tag &&
+            isIDCategory(other) &&
+            Object.entries(tag.tags).every(
+                ([key, value]) => String(other.addTags?.[key]) === String(value)
+            )
+    )
+    if (isWrittenByIDCategory) {
+        tag.searchable = false
+    }
+}
+
+// iD only offers a regional preset (bicycle_foot paths, Irish pubs) where it
+// applies
+for (const tag of tagsOsmgo as Array<TagConfig & { countryCodes?: string[] }>) {
+    const locationSet = tagsID[tag.iDRef]?.locationSet
+    if (!locationSet) continue
+    const { countryCodes, excludeCountryCodes } = getCountryCodes(locationSet)
+    const upperCase = (codes?: string[]) =>
+        codes?.map((code) => code.toUpperCase())
+    if (countryCodes) {
+        tag.countryCodes = upperCase(countryCodes)
+    } else {
+        delete tag.countryCodes
+    }
+    if (excludeCountryCodes) {
+        tag.excludeCountryCodes = upperCase(excludeCountryCodes)
+    } else {
+        delete tag.excludeCountryCodes
     }
 }
 
@@ -274,7 +435,7 @@ for (const fiDId of idTagFieldIds) {
         currentIDPreset['options'] = options
     }
 
-    if (['check', 'onewayCheck'].includes(currentIDPreset.type)) {
+    if (currentIDPreset.type === 'check') {
         const options = [
             { v: 'yes', lbl: { en: 'yes', fr: 'Oui' } },
             { v: 'no', lbl: { en: 'no', fr: 'Non' } },
@@ -282,10 +443,28 @@ for (const fiDId of idTagFieldIds) {
         currentIDPreset['iDtype'] = currentIDPreset.type
         currentIDPreset['type'] = 'select'
         currentIDPreset['options'] = options
-    } else if (
-        ['semiCombo', 'combo', 'access', 'typeCombo'].includes(
-            currentIDPreset.type
+    } else if (['defaultCheck', 'onewayCheck'].includes(currentIDPreset.type)) {
+        // iD lists the unset value ("undefined") first: the select already
+        // offers it, only the real values stay
+        const options = (currentIDPreset.options ?? []).filter(
+            (option) => option.v !== ''
         )
+        currentIDPreset['iDtype'] = currentIDPreset.type
+        currentIDPreset['type'] = 'select'
+        currentIDPreset['options'] =
+            options.length > 0
+                ? options
+                : [{ v: 'yes', lbl: { en: 'yes', fr: 'Oui' } }]
+    } else if (
+        ['semiCombo', 'multiCombo', 'manyCombo'].includes(currentIDPreset.type)
+    ) {
+        // Fields with several values, each with its own editor: semicolon
+        // separated values of one key (`cuisine=pizza;italian`), one `yes` tag
+        // per option under a key prefix (`payment:cash=yes`), or one `yes` tag
+        // per option key (`male=yes`, `female=yes`)
+        currentIDPreset['iDtype'] = currentIDPreset.type
+    } else if (
+        ['combo', 'access', 'typeCombo'].includes(currentIDPreset.type)
     ) {
         currentIDPreset['iDtype'] = currentIDPreset.type
         if (currentIDPreset['options']) {
@@ -309,7 +488,7 @@ for (const fiDId of idTagFieldIds) {
         currentIDPreset['iDtype'] = currentIDPreset.type
         currentIDPreset['type'] = 'text'
     }
-    //TODO :add type multiCombo, textarea... in Osm Go
+    //TODO :add type textarea... in Osm Go
     else {
         console.error(
             `unknown iD type : ${currentIDPreset.type}  => text in Osm Go`
@@ -346,5 +525,5 @@ for (const fiDId of idTagFieldIds) {
     }
 }
 
-fs.writeFileSync(tapTagsPath, stringify(tagConfig), 'utf8')
-fs.writeFileSync(tapPresetsPath, stringify(presetsOsmgo), 'utf8')
+fs.writeFileSync(tapTagsPath, stringifyCatalog(tagConfig), 'utf8')
+fs.writeFileSync(tapPresetsPath, stringifyCatalog(presetsOsmgo), 'utf8')

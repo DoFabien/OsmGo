@@ -1,5 +1,6 @@
 interface TagConfig {
     id: string
+    icon?: string
     tags: Record<string, string>
     presets: Array<string>
     moreFields?: Array<string>
@@ -10,12 +11,15 @@ interface TagConfig {
 interface PresetOption {
     v: string
     lbl?: Record<string, string>
+    countryCodes?: Array<string>
+    excludeCountryCodes?: Array<string>
 }
 
 interface Preset {
     key?: string
     keys?: Array<string>
     type: string
+    iDtype?: string
     lbl?: Record<string, string>
     options?: Array<PresetOption>
 }
@@ -53,6 +57,9 @@ const presetTypes = [
     'url',
     'email',
     'opening_hours',
+    'semiCombo',
+    'multiCombo',
+    'manyCombo',
 ]
 const geometryTypes = ['point', 'vertex', 'line', 'area', 'relation']
 
@@ -198,9 +205,40 @@ describe('generated tags and presets', () => {
     })
 
     it('uses unique option values in every preset', () => {
-        for (const [presetId, preset] of Object.entries(presets)) {
+        for (const [presetId, preset] of Object.entries(basePresets)) {
             const values = (preset.options ?? []).map((option) => option.v)
             expect(new Set(values).size, presetId).toBe(values.length)
+        }
+    })
+
+    it('offers a brand value once in every country', () => {
+        for (const [presetId, preset] of Object.entries(brandPresets)) {
+            const byValue = new Map<string, PresetOption[]>()
+            for (const option of preset.options ?? []) {
+                byValue.set(option.v, [
+                    ...(byValue.get(option.v) ?? []),
+                    option,
+                ])
+            }
+            for (const variants of byValue.values()) {
+                if (variants.length === 1) continue
+                const worldwide = variants.filter(
+                    (option) => !option.countryCodes
+                )
+                const regionalCodes = variants.flatMap(
+                    (option) => option.countryCodes ?? []
+                )
+                expect(worldwide.length, presetId).toBeLessThanOrEqual(1)
+                expect(new Set(regionalCodes).size, presetId).toBe(
+                    regionalCodes.length
+                )
+                for (const code of regionalCodes) {
+                    expect(
+                        worldwide[0]?.excludeCountryCodes ?? [code],
+                        `${presetId} ${variants[0].v}`
+                    ).toContain(code)
+                }
+            }
         }
     })
 
@@ -217,6 +255,94 @@ describe('generated tags and presets', () => {
                 ).toBeTruthy()
             }
         }
+    })
+
+    it('keys a field by a prefix only for a multiCombo', () => {
+        const prefixed = Object.entries(presets).filter(([, preset]) =>
+            [preset.key, ...(preset.keys ?? [])].some((key) =>
+                key?.endsWith(':')
+            )
+        )
+
+        expect(prefixed.length).toBeGreaterThan(0)
+        for (const [presetId, preset] of prefixed) {
+            expect(preset.type, presetId).toBe('multiCombo')
+            expect(preset.keys, presetId).toBeUndefined()
+        }
+        for (const [presetId, preset] of Object.entries(presets)) {
+            if (preset.type === 'multiCombo') {
+                expect(preset.key?.endsWith(':'), presetId).toBe(true)
+            }
+        }
+        expect(presets.payment_multi).toMatchObject({
+            key: 'payment:',
+            type: 'multiCombo',
+        })
+        expect(
+            presets.payment_multi.options?.find((option) => option.v === 'cash')
+                ?.lbl?.fr
+        ).toBeTruthy()
+        expect(
+            tagsConfig.tags.find((tag) => tag.id === 'shop/bakery')?.presets
+        ).toContain('payment_multi')
+    })
+
+    it('offers one option per key for the fields made of several keys', () => {
+        expect(presets.gender).toMatchObject({
+            type: 'manyCombo',
+            keys: ['male', 'female', 'unisex'],
+        })
+        for (const [presetId, preset] of Object.entries(presets)) {
+            if (preset.type !== 'manyCombo') continue
+            expect(preset.key, presetId).toBeUndefined()
+            expect(
+                (preset.options ?? []).map((option) => option.v).sort(),
+                presetId
+            ).toEqual([...(preset.keys ?? [])].sort())
+        }
+    })
+
+    it('edits semicolon separated fields with their own editor', () => {
+        const semiCombo = Object.entries(presets).filter(
+            ([, preset]) => preset.iDtype === 'semiCombo'
+        )
+
+        expect(semiCombo.length).toBeGreaterThan(0)
+        expect(semiCombo.map(([, preset]) => preset.type)).toEqual(
+            semiCombo.map(() => 'semiCombo')
+        )
+        expect(presets.cuisine.type).toBe('semiCombo')
+        expect(presets.cuisine.options?.length).toBeGreaterThan(0)
+    })
+
+    it('offers the real values of oneway and default checks', () => {
+        expect(presets.oneway.type).toBe('select')
+        expect(presets.oneway.options?.map((option) => option.v)).toEqual(
+            expect.arrayContaining(['yes', 'no', 'reversible', 'alternating'])
+        )
+        expect(presets.bicycle_road.type).toBe('select')
+        expect(presets.bicycle_road.options?.map((option) => option.v)).toEqual(
+            ['yes']
+        )
+    })
+
+    it('gives every category an icon', () => {
+        expect(
+            tagsConfig.tags.filter((tag) => !tag.icon).map((tag) => tag.id)
+        ).toEqual([])
+    })
+
+    it('only declares primary keys that a category uses', () => {
+        for (const key of tagsConfig.primaryKeys) {
+            expect(
+                tagsConfig.tags.some((tag) => key in tag.tags),
+                key
+            ).toBe(true)
+        }
+        expect(tagsConfig.primaryKeys).toEqual(
+            expect.arrayContaining(['education'])
+        )
+        expect(tagsConfig.primaryKeys).not.toContain('seamark')
     })
 
     it('keeps progressive catalog count floors', () => {

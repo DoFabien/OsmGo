@@ -18,6 +18,8 @@ declare module '@scripts/osmToOsmgo/index.js' {
         geojsonChanged?: OsmGoFeatureCollection
         oldBboxFeature?: Feature<Polygon | MultiPolygon>
         limitFeatures?: number
+        /** Elements of incomplete relations fetched with `relation/{id}/full`. */
+        supplementalElements?: readonly unknown[]
     }
 
     export interface ConvertResult {
@@ -40,6 +42,11 @@ declare module '@scripts/osmToOsmgo/index.js' {
     ): T
 
     export function wayToPoint<T extends OsmGoFeature>(feature: T): void
+
+    export function findIncompleteMultipolygons(
+        osmData: unknown,
+        options?: { limit?: number; primaryKeys?: readonly string[] | null }
+    ): number[]
 
     export function convert(
         osmData: unknown,

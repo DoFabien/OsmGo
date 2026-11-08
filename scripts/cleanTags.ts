@@ -1,13 +1,63 @@
 import fs from 'fs-extra'
-import stringify from 'json-stringify-pretty-compact'
-import { tapPresetsPath, tapTagsPath } from './_paths'
-import { readTapPresetsFromJson, readTapTagsFromJson } from './_utils'
+import path from 'path'
+import { assetsDir, tapPresetsPath, tapTagsPath } from './_paths'
+import {
+    isUnsupportedField,
+    MULTI_VALUE_FIELD_TYPES,
+    readTapPresetsFromJson,
+    readTapTagsFromJson,
+    stringifyCatalog,
+} from './_utils'
 
 const tagsConfig = readTapTagsFromJson()
 const presetsOsmgo = readTapPresetsFromJson()
+const tagsID = require('@openstreetmap/id-tagging-schema/dist/presets.json')
+const sprites: Record<string, unknown> = fs.readJsonSync(
+    path.join(assetsDir, 'mapStyle', 'sprites', 'sprites.json')
+)
+
+// The map draws this icon for a category without one
+const FALLBACK_ICON = 'maki-circle'
 
 const uniqIds: string[] = []
 const indicesToDelete: number[] = []
+const iconById = new Map(tagsConfig.tags.map((tag) => [tag.id, tag.icon]))
+const iconByTag = new Map(
+    tagsConfig.tags
+        .filter((tag) => Object.keys(tag.tags).length === 1)
+        .map((tag) => {
+            const [key, value] = Object.entries(tag.tags)[0]
+            return [`${key}=${value}`, tag.icon]
+        })
+)
+
+// The iD icon when it is already a sprite, else the one of the closest parent
+// category, else the neutral map icon: a category never has an empty icon.
+const getIconOfTag = (tag: {
+    id: string
+    iDRef?: string
+    addTags?: Record<string, string | number>
+}): string => {
+    const iDIcon = tagsID[tag.iDRef ?? tag.id]?.icon
+    if (iDIcon && sprites[iDIcon]) {
+        return iDIcon
+    }
+    const segments = tag.id.split('/')
+    for (let length = segments.length - 1; length > 0; length--) {
+        const parentIcon = iconById.get(segments.slice(0, length).join('/'))
+        if (parentIcon) {
+            return parentIcon
+        }
+    }
+    // education=school is written with amenity=school: same icon
+    for (const [key, value] of Object.entries(tag.addTags ?? {})) {
+        const siblingIcon = iconByTag.get(`${key}=${value}`)
+        if (siblingIcon) {
+            return siblingIcon
+        }
+    }
+    return FALLBACK_ICON
+}
 
 const getCanonicalPresetId = (presetId: string): string => {
     const preset = presetsOsmgo[presetId]
@@ -29,9 +79,17 @@ const getCanonicalPresetId = (presetId: string): string => {
 for (let i = 0; i < tagsConfig.tags.length; i++) {
     const tag = tagsConfig.tags[i]
 
-    tag.presets = [...new Set(tag.presets.map(getCanonicalPresetId))]
+    const isEditable = (presetId: string): boolean =>
+        !presetsOsmgo[presetId] || !isUnsupportedField(presetsOsmgo[presetId])
+    tag.presets = [
+        ...new Set(tag.presets.map(getCanonicalPresetId).filter(isEditable)),
+    ]
     if (tag.moreFields) {
-        tag.moreFields = [...new Set(tag.moreFields.map(getCanonicalPresetId))]
+        tag.moreFields = [
+            ...new Set(
+                tag.moreFields.map(getCanonicalPresetId).filter(isEditable)
+            ),
+        ]
     }
 
     if (tag.id) {
@@ -57,9 +115,9 @@ for (let i = 0; i < tagsConfig.tags.length; i++) {
         }
     }
 
-    if (tag.icon === undefined) {
-        console.error(`No icon for tag ${tag.id}`)
-        tag.icon = ''
+    if (!tag.icon) {
+        tag.icon = getIconOfTag(tag)
+        console.log(`No icon for tag ${tag.id} => ${tag.icon}`)
     }
 
     if (!tag.tags) {
@@ -75,7 +133,7 @@ for (let i = indicesToDelete.length - 1; i >= 0; i--) {
 
 console.log(indicesToDelete)
 
-fs.writeFileSync(tapTagsPath, stringify(tagsConfig))
+fs.writeFileSync(tapTagsPath, stringifyCatalog(tagsConfig))
 
 // Delete unused presets
 let usedPresetIdsFromTags: string[] = []
@@ -95,6 +153,10 @@ for (const pid in presetsOsmgo) {
     }
 
     const preset = presetsOsmgo[pid]
+    // a field with several values keeps the editor of its iD type
+    if (MULTI_VALUE_FIELD_TYPES.includes(preset.iDtype ?? '')) {
+        preset.type = preset.iDtype as string
+    }
     if (preset.options) {
         preset.options = preset.options.filter((option) => {
             return !(
@@ -114,4 +176,4 @@ for (const pid in presetsOsmgo) {
 //         }
 //     }
 // }
-fs.writeFileSync(tapPresetsPath, stringify(presetsOsmgo))
+fs.writeFileSync(tapPresetsPath, stringifyCatalog(presetsOsmgo))

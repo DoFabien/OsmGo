@@ -1,10 +1,9 @@
 import fs from 'fs-extra'
-import stringify from 'json-stringify-pretty-compact'
 import yargs from 'yargs'
 import { fetchJson } from './_fetch'
 import { defaultLanguages } from './_i18n'
 import { tapTagsPath } from './_paths'
-import { readTapTagsFromJson } from './_utils'
+import { readTapTagsFromJson, stringifyCatalog } from './_utils'
 
 const args = yargs(process.argv.slice(2))
     .usage(
@@ -112,7 +111,7 @@ const run = async (language: string) => {
             }
         }
     }
-    fs.writeFileSync(tapTagsPath, stringify(tagsOsmgo), 'utf8')
+    fs.writeFileSync(tapTagsPath, stringifyCatalog({ ...tagsOsmgo }), 'utf8')
 }
 
 for (const language of args.language as string[]) {

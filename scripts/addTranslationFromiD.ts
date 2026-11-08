@@ -1,9 +1,12 @@
 import { writeFileSync } from 'fs'
-import stringify from 'json-stringify-pretty-compact'
 import yargs from 'yargs'
 import { defaultLanguages } from './_i18n'
 import { tapPresetsPath, tapTagsPath } from './_paths'
-import { readTapPresetsFromJson, readTapTagsFromJson } from './_utils'
+import {
+    readTapPresetsFromJson,
+    readTapTagsFromJson,
+    stringifyCatalog,
+} from './_utils'
 
 const args = yargs(process.argv.slice(2))
     .usage(
@@ -28,6 +31,30 @@ const args = yargs(process.argv.slice(2))
             'Languages that should be looked up through the taginfo.openstreetmap.org service',
     })
     .parseSync()
+
+// Words people search with that iD does not list
+const EXTRA_TERMS: Record<string, Record<string, string[]>> = {
+    'amenity/post_office': { fr: ['poste', 'la poste'] },
+    'amenity/recycling_container': {
+        fr: [
+            'verre',
+            'conteneur à verre',
+            'colonne à verre',
+            'bouteilles',
+            'papier',
+            'emballages',
+        ],
+    },
+    'education/school': {
+        fr: [
+            'école',
+            'école primaire',
+            'école élémentaire',
+            'collège',
+            'lycée',
+        ],
+    },
+}
 
 for (const language of args.language as string[]) {
     const idTr = require(
@@ -75,9 +102,24 @@ for (const language of args.language as string[]) {
                     }
                 }
             }
+            const extraTerms = EXTRA_TERMS[tag.id]?.[language]
+            if (extraTerms) {
+                const terms = tag.terms?.[language] ?? []
+                tag.terms = {
+                    ...tag.terms,
+                    [language]: [
+                        ...new Set([
+                            ...(Array.isArray(terms)
+                                ? terms
+                                : terms.split(',')),
+                            ...extraTerms,
+                        ]),
+                    ],
+                }
+            }
         }
 
-        writeFileSync(tapTagsPath, stringify(tagsOsmgoConfig), 'utf8')
+        writeFileSync(tapTagsPath, stringifyCatalog(tagsOsmgoConfig), 'utf8')
     }
 
     const importFields = (language: string) => {
@@ -132,7 +174,7 @@ for (const language of args.language as string[]) {
             //
         }
 
-        writeFileSync(tapPresetsPath, stringify(presetsOsmgo), 'utf8')
+        writeFileSync(tapPresetsPath, stringifyCatalog(presetsOsmgo), 'utf8')
     }
 
     importTrTags(language)

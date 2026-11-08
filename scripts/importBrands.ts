@@ -1,7 +1,10 @@
 import fs from 'fs-extra'
-import stringify from 'json-stringify-pretty-compact'
 import { tapBrandPresetsPath, tapPresetsPath, tapTagsPath } from './_paths'
-import { readTapPresetsFromJson, readTapTagsFromJson } from './_utils'
+import {
+    readTapPresetsFromJson,
+    readTapTagsFromJson,
+    stringifyCatalog,
+} from './_utils'
 import { type BrandOption, getBrandOptions } from './nameSuggestionIndex'
 
 const tagsConfig = readTapTagsFromJson()
@@ -15,11 +18,12 @@ const addBrandPreset = (
     options: Array<BrandOption>
 ): void => {
     const compactOptions = options.map(
-        ({ v, lbl, countryCodes, tags, addTags }) => {
+        ({ v, lbl, countryCodes, excludeCountryCodes, tags, addTags }) => {
             return {
                 v,
                 lbl,
                 ...(countryCodes ? { countryCodes } : {}),
+                ...(excludeCountryCodes ? { excludeCountryCodes } : {}),
                 tags,
                 addTags,
             }
@@ -50,22 +54,30 @@ const run = () => {
     }
 
     for (const tagConfig of tags) {
-        const pkey = Object.keys(tagConfig.tags)[0]
+        // The brands hang on an iD preset: a category with several tags
+        // (`amenity=fast_food` + `cuisine=burger`) is found by its iD reference
+        const tagKeys = Object.keys(tagConfig.tags)
+        const singleTag =
+            tagKeys.length === 1 && tagConfig.tags[tagKeys[0]]
+                ? `${tagKeys[0]}/${tagConfig.tags[tagKeys[0]]}`
+                : undefined
+        const brandPath = [singleTag, tagConfig.iDRef, tagConfig.id].find(
+            (path) => path && brandsData[path]
+        )
+        if (brandPath) {
+            const id = `${brandPath.replaceAll('/', '#')}#brand`
+            addBrandPreset(brandPresets, id, brandsData[brandPath])
 
-        if (Object.keys(tagConfig.tags).length === 1 && tagConfig.tags[pkey]) {
-            const value = tagConfig.tags[pkey]
-            if (brandsData[`${pkey}/${value}`]) {
-                const brandOptions = brandsData[`${pkey}/${value}`]
-                const id = `${pkey}#${value}#brand`
-                addBrandPreset(brandPresets, id, brandOptions)
-
-                tagConfig.presets = [id, ...tagConfig.presets]
-            }
+            tagConfig.presets = [id, ...tagConfig.presets]
         }
     }
 
-    fs.writeFileSync(tapPresetsPath, stringify(presets), 'utf8')
-    fs.writeFileSync(tapBrandPresetsPath, stringify(brandPresets), 'utf8')
-    fs.writeFileSync(tapTagsPath, stringify(tagsConfig), 'utf8')
+    fs.writeFileSync(tapPresetsPath, stringifyCatalog(presets), 'utf8')
+    fs.writeFileSync(
+        tapBrandPresetsPath,
+        stringifyCatalog(brandPresets),
+        'utf8'
+    )
+    fs.writeFileSync(tapTagsPath, stringifyCatalog(tagsConfig), 'utf8')
 }
 run()

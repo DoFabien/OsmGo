@@ -183,6 +183,103 @@ describe('TagsService', () => {
         })
     })
 
+    it('finds the primary tag by key priority, not by tag order', async () => {
+        const healthcareTag = {
+            ...createValidTag(),
+            id: 'healthcare/pharmacy',
+            tags: { healthcare: 'pharmacy' },
+        }
+        const http = {
+            get: vi.fn(() =>
+                of({
+                    primaryKeys: ['shop', 'amenity', 'healthcare'],
+                    tags: [createValidTag(), healthcareTag],
+                })
+            ),
+        }
+        TestBed.configureTestingModule({
+            providers: [
+                { provide: HttpClient, useValue: http },
+                {
+                    provide: AppStorage,
+                    useValue: { set: vi.fn(() => Promise.resolve()) },
+                },
+            ],
+        })
+        const service = TestBed.inject(TagsService)
+
+        await firstValueFrom(service.getTagsConfig$())
+
+        expect(
+            service.findPkey([
+                { key: 'healthcare', value: 'pharmacy' },
+                { key: 'name', value: 'Pharmacie' },
+                { key: 'amenity', value: 'pharmacy' },
+            ])
+        ).toEqual({ key: 'amenity', value: 'pharmacy' })
+        expect(
+            service.findPkey([
+                { key: 'amenity', value: '' },
+                { key: 'healthcare', value: 'pharmacy' },
+            ])
+        ).toEqual({ key: 'healthcare', value: 'pharmacy' })
+        expect(service.findPkey([{ key: 'amenity', value: '' }])).toEqual({
+            key: 'amenity',
+            value: '',
+        })
+        expect(service.findPkey([{ key: 'name', value: 'x' }])).toBeUndefined()
+    })
+
+    it('exposes a light catalog for the converter', async () => {
+        const full = {
+            ...createValidTag(),
+            lbl: { en: 'Cafe', fr: 'Café' },
+            terms: { en: 'coffee' },
+            description: { en: 'A cafe' },
+            presets: ['name', 'wheelchair'],
+            moreFields: ['phone'],
+            addTags: { amenity: 'cafe', cuisine: 'coffee_shop' },
+            searchable: false,
+            deprecated: true,
+            replace: { amenity: 'restaurant' },
+            matchScore: 0.5,
+        }
+        const http = {
+            get: vi.fn(() => of({ primaryKeys: ['amenity'], tags: [full] })),
+        }
+        TestBed.configureTestingModule({
+            providers: [
+                { provide: HttpClient, useValue: http },
+                {
+                    provide: AppStorage,
+                    useValue: {
+                        set: vi.fn(() => Promise.resolve()),
+                        get: vi.fn(() => Promise.resolve(null)),
+                    },
+                },
+            ],
+        })
+        const service = TestBed.inject(TagsService)
+
+        await firstValueFrom(service.loadTags$())
+
+        const [light] = service.converterTags()
+        expect(light).toEqual({
+            id: 'amenity/cafe',
+            tags: { amenity: 'cafe' },
+            addTags: { amenity: 'cafe', cuisine: 'coffee_shop' },
+            icon: 'maki-cafe',
+            markerColor: '#123456',
+            deprecated: true,
+            replace: { amenity: 'restaurant' },
+            searchable: false,
+            matchScore: 0.5,
+            presets: [],
+            geometry: [],
+        })
+        expect(service.converterTags()).toBe(service.converterTags())
+    })
+
     it('uses a versioned valid cache when the current catalog is malformed', async () => {
         const warning = vi
             .spyOn(console, 'warn')

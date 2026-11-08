@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http'
-import { inject, isDevMode, Service, signal } from '@angular/core'
+import { computed, inject, isDevMode, Service, signal } from '@angular/core'
 import { requireValidOsmTag } from '@app/utils/osm-tags'
 import type {
     JsonSprites,
@@ -81,6 +81,38 @@ export class TagsService {
     readonly tags = this.tagsState.asReadonly()
     private readonly tagsByIdState = signal<Record<string, TagConfig>>({})
     readonly tagsById = this.tagsByIdState.asReadonly()
+    /**
+     * What the converter reads to match and style an object: no labels, terms,
+     * descriptions or fields. Copying it to the worker costs a fraction of the
+     * full catalog.
+     */
+    readonly converterTags = computed<TagConfig[]>(() =>
+        this.tags().map(
+            ({
+                id,
+                tags,
+                addTags,
+                icon,
+                markerColor,
+                deprecated,
+                replace,
+                searchable,
+                matchScore,
+            }: TagConfig) => ({
+                id,
+                tags,
+                ...(addTags ? { addTags } : {}),
+                icon,
+                markerColor,
+                ...(deprecated ? { deprecated } : {}),
+                ...(deprecated && replace ? { replace } : {}),
+                ...(searchable === false ? { searchable } : {}),
+                ...(matchScore !== undefined ? { matchScore } : {}),
+                presets: [],
+                geometry: [],
+            })
+        )
+    )
     private readonly catalogMetricsState = signal<
         Partial<
             Record<'tags' | 'presets' | 'brands' | 'sprites', CatalogLoadMetric>
@@ -102,7 +134,6 @@ export class TagsService {
     readonly jsonSprites = this.jsonSpritesState.asReadonly()
 
     defaultHiddenTagsIds: string[] = [
-        'highway/pedestrian_area',
         'highway/footway',
         'highway/motorway',
         'highway/trunk',
@@ -490,26 +521,22 @@ export class TagsService {
         this.localStorage.set('savedFields', this.savedFields)
     }
 
+    // Same rule as the converter: the highest priority primary key wins, not
+    // the first one met in the tags.
     findPkey(featureOrTags: OsmGoFeature | Tag[]): PrimaryTag | undefined {
-        const pkeys = this.primaryKeys()
-        if (
-            !Array.isArray(featureOrTags) &&
-            featureOrTags.properties &&
-            featureOrTags.properties.tags
-        ) {
-            for (const k in featureOrTags.properties.tags) {
-                if (pkeys.includes(k)) {
-                    return { key: k, value: featureOrTags.properties.tags[k] }
-                }
-            }
-        } else if (Array.isArray(featureOrTags)) {
-            for (const t of featureOrTags) {
-                if (pkeys.includes(t.key)) {
-                    return { key: t.key, value: t.value }
-                }
-            }
+        const tags = Array.isArray(featureOrTags)
+            ? featureOrTags
+            : Object.entries(featureOrTags.properties?.tags ?? {}).map(
+                  ([key, value]) => ({ key, value })
+              )
+        let fallback: PrimaryTag | undefined
+        for (const key of this.primaryKeys()) {
+            const tag = tags.find((candidate) => candidate.key === key)
+            if (!tag) continue
+            if (tag.value !== '') return { key, value: tag.value }
+            fallback ??= { key, value: tag.value }
         }
-        return undefined
+        return fallback
     }
 
     getTagsConfig$(): Observable<TagsJson> {

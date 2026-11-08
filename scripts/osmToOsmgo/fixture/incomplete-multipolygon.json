@@ -1,0 +1,213 @@
+{
+  "map": {
+    "version": "0.6",
+    "bounds": {
+      "minlat": 0,
+      "minlon": 0,
+      "maxlat": 1,
+      "maxlon": 1
+    },
+    "elements": [
+      {
+        "type": "node",
+        "id": 1,
+        "lon": 0.2,
+        "lat": 0.2,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 2,
+        "lon": 0.6,
+        "lat": 0.2,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 3,
+        "lon": 0.6,
+        "lat": 0.6,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 4,
+        "lon": 0.2,
+        "lat": 0.6,
+        "version": 1
+      },
+      {
+        "type": "way",
+        "id": 10,
+        "version": 1,
+        "nodes": [
+          2,
+          1,
+          4,
+          3
+        ]
+      },
+      {
+        "type": "relation",
+        "id": 40,
+        "version": 3,
+        "members": [
+          {
+            "type": "way",
+            "ref": 10,
+            "role": "outer"
+          },
+          {
+            "type": "way",
+            "ref": 11,
+            "role": "outer"
+          },
+          {
+            "type": "node",
+            "ref": 99,
+            "role": "label"
+          }
+        ],
+        "tags": {
+          "type": "multipolygon",
+          "leisure": "park",
+          "name": "Parc coup\u00e9"
+        }
+      },
+      {
+        "type": "relation",
+        "id": 41,
+        "version": 1,
+        "members": [
+          {
+            "type": "way",
+            "ref": 11,
+            "role": "outer"
+          }
+        ],
+        "tags": {
+          "type": "multipolygon",
+          "landuse": "meadow"
+        }
+      }
+    ]
+  },
+  "relationFull": {
+    "version": "0.6",
+    "elements": [
+      {
+        "type": "node",
+        "id": 1,
+        "lon": 0.2,
+        "lat": 0.2,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 2,
+        "lon": 0.6,
+        "lat": 0.2,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 3,
+        "lon": 0.6,
+        "lat": 0.6,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 4,
+        "lon": 0.2,
+        "lat": 0.6,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 5,
+        "lon": 1.4,
+        "lat": 0.2,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 6,
+        "lon": 1.4,
+        "lat": 0.6,
+        "version": 1
+      },
+      {
+        "type": "node",
+        "id": 7,
+        "lon": 1.3,
+        "lat": 0.4,
+        "version": 1,
+        "tags": {
+          "amenity": "bench"
+        }
+      },
+      {
+        "type": "way",
+        "id": 10,
+        "version": 1,
+        "nodes": [
+          2,
+          1,
+          4,
+          3
+        ]
+      },
+      {
+        "type": "way",
+        "id": 11,
+        "version": 1,
+        "nodes": [
+          3,
+          6,
+          5,
+          2
+        ]
+      },
+      {
+        "type": "way",
+        "id": 12,
+        "version": 1,
+        "nodes": [
+          7,
+          5
+        ],
+        "tags": {
+          "highway": "footway"
+        }
+      },
+      {
+        "type": "relation",
+        "id": 40,
+        "version": 3,
+        "members": [
+          {
+            "type": "way",
+            "ref": 10,
+            "role": "outer"
+          },
+          {
+            "type": "way",
+            "ref": 11,
+            "role": "outer"
+          },
+          {
+            "type": "node",
+            "ref": 99,
+            "role": "label"
+          }
+        ],
+        "tags": {
+          "type": "multipolygon",
+          "leisure": "park",
+          "name": "Parc coup\u00e9"
+        }
+      }
+    ]
+  }
+}

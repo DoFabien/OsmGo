@@ -1,6 +1,5 @@
 import area from '@turf/area'
 import bboxPolygon from '@turf/bbox-polygon'
-import booleanPointInPolygon from '@turf/boolean-point-in-polygon'
 import length from '@turf/length'
 import pointOnFeature from '@turf/point-on-feature'
 
@@ -172,14 +171,17 @@ const isFilteredByKeys = (tags, keysFilter) => {
     return false
 }
 
+// An empty value (amenity=) only stands for the object when no other primary
+// key has a value, as in TagsService.findPkey.
 const getPrimaryKeyOfObject = (feature, primaryKeys) => {
     const tags = feature.properties.tags
+    let fallback = null
     for (const key of primaryKeys) {
-        if (Object.hasOwn(tags, key)) {
-            return { key, value: tags[key] }
-        }
+        if (!Object.hasOwn(tags, key)) continue
+        if (tags[key] !== '') return { key, value: tags[key] }
+        fallback ??= { key, value: tags[key] }
     }
-    return null
+    return fallback
 }
 
 const tagConfigIndexCache = new WeakMap()
@@ -190,22 +192,134 @@ const getTagConfigIndex = (presets) => {
 
     const byId = new Map()
     const order = new Map()
-    const byPrimaryTag = new Map()
-    presets.forEach((variant, index) => {
+    const byPair = new Map()
+    const signatures = new Map()
+    presets.forEach((variant, position) => {
         byId.set(variant.id, variant)
-        order.set(variant, index)
+        order.set(variant, position)
+        signatures.set(
+            variant,
+            JSON.stringify(Object.entries(variant.tags).sort())
+        )
         for (const [key, value] of Object.entries(variant.tags)) {
-            const primaryTag = `${key}/${value}`
-            if (!variant.id.includes(primaryTag)) continue
-            const candidates = byPrimaryTag.get(primaryTag) ?? []
-            candidates.push(variant)
-            byPrimaryTag.set(primaryTag, candidates)
+            let values = byPair.get(key)
+            if (!values) {
+                values = new Map()
+                byPair.set(key, values)
+            }
+            const variants = values.get(String(value))
+            if (variants) {
+                variants.push(variant)
+            } else {
+                values.set(String(value), [variant])
+            }
         }
     })
 
-    const index = { byId, order, byPrimaryTag, inheritedById: new Map() }
+    const index = {
+        byId,
+        order,
+        byPair,
+        signatures,
+        inheritedById: new Map(),
+    }
     tagConfigIndexCache.set(presets, index)
     return index
+}
+
+const hasTag = (tags, key, value) =>
+    tags[key] !== undefined &&
+    tags[key] !== null &&
+    (value === '*' ? tags[key] !== '' : String(tags[key]) === String(value))
+
+// A deprecated category whose upgrade would change nothing (railway=platform
+// already written with public_transport=platform) no longer describes the
+// object.
+const isAlreadyUpgraded = (variant, tags) =>
+    Boolean(variant.deprecated && variant.replace) &&
+    Object.keys(variant.tags).every((key) =>
+        Object.hasOwn(variant.replace, key)
+    ) &&
+    Object.entries(variant.replace).every(([key, value]) =>
+        hasTag(tags, key, value)
+    )
+
+// Every exact tag counts 1, a "*" tag 0.5 and addTags that the object already
+// carries count as extra evidence. A category whose tags are not all present
+// on the object scores -1.
+const countMatches = (variant, tags) => {
+    let matches = 0
+    for (const [key, value] of Object.entries(variant.tags)) {
+        if (!hasTag(tags, key, value)) return -1
+        matches += value === '*' ? 0.5 : 1
+    }
+    if (variant.addTags) {
+        for (const [key, value] of Object.entries(variant.addTags)) {
+            if (
+                value !== '*' &&
+                !Object.hasOwn(variant.tags, key) &&
+                hasTag(tags, key, value)
+            ) {
+                matches += 1
+            }
+        }
+    }
+    return isAlreadyUpgraded(variant, tags) ? -1 : matches
+}
+
+// Mirrors the iD preset score: the matches weighed by the matchScore of the
+// category (1 by default, 0.5 for a building).
+const rankVariant = (variant, matches, primaryKey, index) => ({
+    variant,
+    matches,
+    score: matches * (variant.matchScore ?? 1),
+    hasPrimaryKey: Object.hasOwn(variant.tags, primaryKey),
+    size: Object.keys(variant.tags).length,
+    searchable: variant.searchable !== false,
+    signature: index.signatures.get(variant),
+    position: index.order.get(variant),
+})
+
+// The best score wins, then the category of the object's primary key, the
+// category with the most tags and, between categories made of the same tags,
+// the one that iD offers in its search. The catalog order settles the rest.
+const isBetterRank = (candidate, best) =>
+    !best ||
+    candidate.score > best.score ||
+    (candidate.score === best.score &&
+        (candidate.hasPrimaryKey !== best.hasPrimaryKey
+            ? candidate.hasPrimaryKey
+            : candidate.size !== best.size
+              ? candidate.size > best.size
+              : candidate.searchable !== best.searchable &&
+                  candidate.signature === best.signature
+                ? candidate.searchable
+                : candidate.position < best.position))
+
+const findBestVariant = (tags, primaryKey, index) => {
+    const seen = new Set()
+    let best
+    for (const [key, value] of Object.entries(tags)) {
+        const values = index.byPair.get(key)
+        if (!values) continue
+        for (const variants of [values.get(String(value)), values.get('*')]) {
+            if (!variants) continue
+            for (const variant of variants) {
+                if (seen.has(variant)) continue
+                seen.add(variant)
+                const matches = countMatches(variant, tags)
+                if (matches < 0) continue
+                const candidate = rankVariant(
+                    variant,
+                    matches,
+                    primaryKey,
+                    index
+                )
+                if (isBetterRank(candidate, best)) best = candidate
+            }
+        }
+    }
+    return best
 }
 
 const getInheritedConfigs = (featureID, index) => {
@@ -228,138 +342,81 @@ const getInheritedConfigs = (featureID, index) => {
     return inherited
 }
 
-export function getConfigTag(feature, presets) {
-    const featureID = feature.properties.configId
-    const featurePrimaryTag = `${feature.properties.primaryTag.key}/${feature.properties.primaryTag.value}`
-    const featureTags = feature.properties.tags
-    let mostMaches = 0
-
-    const match = { exact: undefined, presets: [], moreFields: [] }
+// A configId only survives while the tags of its category are still on the
+// object and no other category matches more of them; otherwise the object is
+// matched again, so an edited object does not keep the category it had before.
+// The iD weights only rank the categories that nobody chose (a road bridge
+// picked by the user stays one).
+const resolveVariant = (feature, presets) => {
     const index = getTagConfigIndex(presets)
-    const candidates = featureID
-        ? getInheritedConfigs(featureID, index)
-        : (index.byPrimaryTag.get(featurePrimaryTag) ?? [])
-    for (const variant of candidates) {
-        const presetID = variant.id
-        if (featureID) {
-            // Save presets and moreFields from parent IDs
-            if (
-                featureID === presetID ||
-                featureID.startsWith(`${presetID}/`)
-            ) {
-                if (variant.presets) match.presets.push(...variant.presets)
-                if (variant.moreFields)
-                    match.moreFields.push(...variant.moreFields)
-            }
-            if (featureID == presetID) {
-                match.exact = variant
-            }
-        } else {
-            if (!presetID.includes(featurePrimaryTag)) continue
-            let matches = 0
-            for (const key in variant.tags) {
-                if (
-                    !featureTags[key] ||
-                    featureTags[key] !== variant.tags[key]
-                ) {
-                } else {
-                    matches++
-                }
-            }
-            if (matches == Object.keys(variant.tags).length) {
-                if (variant.presets) match.presets.push(...variant.presets)
-                if (variant.moreFields)
-                    match.moreFields.push(...variant.moreFields)
-                if (matches > mostMaches) {
-                    match.exact = variant
-                    mostMaches = matches
-                }
-            }
+    const tags = feature.properties.tags
+    const primaryTag = feature.properties.primaryTag
+    const best = findBestVariant(tags, primaryTag?.key ?? primaryTag?.k, index)
+    const current = feature.properties.configId
+        ? index.byId.get(feature.properties.configId)
+        : undefined
+    // a deprecated category is only kept while no other category fits
+    if (current && !(current.deprecated && best && !best.variant.deprecated)) {
+        const currentMatches = countMatches(current, tags)
+        if (currentMatches >= 0 && (!best || currentMatches >= best.matches)) {
+            return { variant: current, index }
         }
     }
-
-    if (match.exact) {
-        const result = JSON.parse(JSON.stringify(match.exact)) // DeepCopy
-        // Add presets and moreFields from parent IDs
-        result.presets = [...new Set(match.presets)]
-        result.moreFields = [...new Set(match.moreFields)]
-        return result
-    } else {
-        // oops...
-        const k = feature.properties.primaryTag.k ? 'k' : 'key'
-        const v = feature.properties.primaryTag.k ? 'v' : 'value'
-
-        const unkownsId = `${feature.properties.primaryTag[k]}/${feature.properties.primaryTag[v]}`
-        const unkownsTagConfig = {
-            key: feature.properties.primaryTag[k],
-            icon: 'wiki-question',
-            markerColor: '#000000',
-            lbl: {
-                en: `${feature.properties.primaryTag[k]} = ${feature.properties.primaryTag[v]}`,
-            },
-            presets: [],
-            geometry: [],
-            tags: {},
-            id: unkownsId,
-            unknowTags: true,
-        }
-        unkownsTagConfig['tags'][feature.properties.primaryTag[k]] =
-            feature.properties.primaryTag[v]
-        return unkownsTagConfig
-    }
+    return { variant: best?.variant, index }
 }
 
-/*
-export function getConfigTag(feature, tagsConfig) {
-    // TODO : This should be optimized
-    const featureTags = feature.properties.tags
-    let match = { conf: undefined, matchProps: 0 }
-    for (let variant of tagsConfig) {
-        const firstKeyTag = Object.keys(variant.tags)[0] // we must have the first key of tag config
-        let nb = 0
-        for (let vk in variant.tags) {
-            if (
-                !featureTags[vk] ||
-                featureTags[vk] !== variant.tags[vk] ||
-                !featureTags[firstKeyTag]
-            ) {
-                nb = 0
-                continue
-            } else {
-                nb++
-            }
-        }
-        if (nb > match.matchProps) {
-            match = { conf: variant, matchProps: nb }
-        }
-    }
-    if (match.conf) {
-        return match.conf
-    } else {
-        // oops...
-        const k = feature.properties.primaryTag.k ? 'k' : 'key'
-        const v = feature.properties.primaryTag.k ? 'v' : 'value'
+const isBrandPreset = (presetId) => presetId.endsWith('#brand')
 
-        const unkownsId = `${feature.properties.primaryTag[k]}/${feature.properties.primaryTag[v]}`
-        const unkownsTagConfig = {
-            key: feature.properties.primaryTag[k],
-            icon: 'wiki-question',
-            markerColor: '#000000',
-            lbl: {
-                en: `${feature.properties.primaryTag[k]} = ${feature.properties.primaryTag[v]}`,
-            },
-            presets: [],
-            geometry: [],
-            tags: {},
-            id: unkownsId,
-            unknowTags: true,
-        }
-        unkownsTagConfig['tags'][feature.properties.primaryTag[k]] =
-            feature.properties.primaryTag[v]
-        return unkownsTagConfig
+const getUnknownTagConfig = (feature) => {
+    const k = feature.properties.primaryTag.k ? 'k' : 'key'
+    const v = feature.properties.primaryTag.k ? 'v' : 'value'
+
+    const unkownsId = `${feature.properties.primaryTag[k]}/${feature.properties.primaryTag[v]}`
+    const unkownsTagConfig = {
+        key: feature.properties.primaryTag[k],
+        icon: 'wiki-question',
+        markerColor: '#000000',
+        lbl: {
+            en: `${feature.properties.primaryTag[k]} = ${feature.properties.primaryTag[v]}`,
+        },
+        presets: [],
+        geometry: [],
+        tags: {},
+        id: unkownsId,
+        unknowTags: true,
     }
+    unkownsTagConfig['tags'][feature.properties.primaryTag[k]] =
+        feature.properties.primaryTag[v]
+    return unkownsTagConfig
 }
-*/
+
+export function getConfigTag(feature, presets) {
+    const { variant, index } = resolveVariant(feature, presets)
+    if (!variant) return getUnknownTagConfig(feature)
+
+    const inherited = getInheritedConfigs(variant.id, index)
+    const result = structuredClone(variant)
+    // Presets and moreFields come from the slash-delimited parent IDs. The
+    // brands of a more specific category (burger) replace those of its
+    // parent (fast food) instead of adding a second brand field.
+    const hasOwnBrands = (variant.presets ?? []).some(isBrandPreset)
+    result.presets = [
+        ...new Set(
+            inherited.flatMap((config) =>
+                (config.presets ?? []).filter(
+                    (presetId) =>
+                        config === variant ||
+                        !hasOwnBrands ||
+                        !isBrandPreset(presetId)
+                )
+            )
+        ),
+    ]
+    result.moreFields = [
+        ...new Set(inherited.flatMap((config) => config.moreFields ?? [])),
+    ]
+    return result
+}
 
 export function addAttributesToFeature(feature) {
     // /!\ mutable !
@@ -386,7 +443,9 @@ export function addAttributesToFeature(feature) {
 export function setIconStyle(feature, tagsConfig) {
     // /!\ mutable
 
-    const configMarker = getConfigTag(feature, tagsConfig)
+    const configMarker =
+        resolveVariant(feature, tagsConfig).variant ??
+        getUnknownTagConfig(feature)
     delete feature.properties.unknowTags
 
     let markerShape
@@ -443,17 +502,75 @@ const getMergedGeojsonGeojsonChanged = (geojson, geojsonChanged) => {
     }
 }
 
+const bboxBounds = (bboxFeature) => {
+    const ring = bboxFeature.geometry.coordinates[0]
+    const longitudes = ring.map((coordinate) => coordinate[0])
+    const latitudes = ring.map((coordinate) => coordinate[1])
+    return [
+        Math.min(...longitudes),
+        Math.min(...latitudes),
+        Math.max(...longitudes),
+        Math.max(...latitudes),
+    ]
+}
+
+const someCoordinate = (geometry, predicate) => {
+    switch (geometry?.type) {
+        case 'Point':
+            return predicate(geometry.coordinates)
+        case 'LineString':
+        case 'MultiPoint':
+            return geometry.coordinates.some(predicate)
+        case 'Polygon':
+        case 'MultiLineString':
+            return geometry.coordinates.some((line) => line.some(predicate))
+        case 'MultiPolygon':
+            return geometry.coordinates.some((polygon) =>
+                polygon.some((ring) => ring.some(predicate))
+            )
+        case 'GeometryCollection':
+            return geometry.geometries.some((member) =>
+                someCoordinate(member, predicate)
+            )
+        default:
+            return false
+    }
+}
+
+// The OSM map call returns every node of the area and every way or relation
+// that uses one of them. A cached object that is missing from the answer is
+// only proven deleted when one of its own nodes lies in the area: its
+// representative point alone (a large park, a relation spanning the area)
+// says nothing, because the object can simply be outside of the answer.
+const isProvenAbsent = (feature, [west, south, east, north]) => {
+    const isInside = ([longitude, latitude]) =>
+        longitude >= west &&
+        longitude <= east &&
+        latitude >= south &&
+        latitude <= north
+    return someCoordinate(
+        feature.properties?.way_geometry ?? feature.geometry,
+        isInside
+    )
+}
+
 export const mergeOldNewGeojsonData = (
     oldGeojson,
     newGeojson,
     newFeatureBbox,
-    geojsonChanged
+    geojsonChanged,
+    retainedIds
 ) => {
     const oldFeatures = oldGeojson.features ?? []
     const byId = new Map(oldFeatures.map((feature) => [feature.id, feature]))
+    const bounds = bboxBounds(newFeatureBbox)
     const idsInsideBbox = new Set(
         oldFeatures
-            .filter((feature) => booleanPointInPolygon(feature, newFeatureBbox))
+            .filter(
+                (feature) =>
+                    !retainedIds?.has(feature.id) &&
+                    isProvenAbsent(feature, bounds)
+            )
             .map((feature) => feature.id)
     )
 
@@ -493,6 +610,100 @@ const mergeBounds = (newBboxFeature, oldBboxFeature) => {
         }
         return { type: 'FeatureCollection', features: [mergedFeature] }
     }
+}
+
+// A larger relation (a forest, a lake shore) would make the follow-up
+// request heavy for one object.
+const MAX_SUPPLEMENTED_RELATION_MEMBERS = 500
+
+const isRingRole = (role) => role === '' || role === 'outer' || role === 'inner'
+
+// A wood or a lake is huge and seldom edited here: completing it would add
+// seconds to the download for one shape.
+const LARGE_SURFACES = {
+    natural: [
+        'bare_rock',
+        'beach',
+        'glacier',
+        'grassland',
+        'heath',
+        'sand',
+        'scree',
+        'scrub',
+        'shingle',
+        'water',
+        'wetland',
+        'wood',
+    ],
+    waterway: ['riverbank'],
+    leisure: ['nature_reserve'],
+}
+
+const isLargeSurface = (tags, primaryKeys) => {
+    const primaryTag = getPrimaryKeyOfObject(
+        { properties: { tags } },
+        primaryKeys ?? Object.keys(tags)
+    )
+    return Boolean(
+        primaryTag &&
+            LARGE_SURFACES[primaryTag.key]?.includes(String(primaryTag.value))
+    )
+}
+
+// The map call only returns the ways that touch the area: a multipolygon that
+// crosses its edge misses some of its rings and cannot be drawn. Its full
+// version (`relation/{id}/full`) can then be given as supplemental elements.
+export const findIncompleteMultipolygons = (osmData, options = {}) => {
+    const osm = typeof osmData == 'string' ? JSON.parse(osmData) : osmData
+    const limit = Number.isInteger(options.limit) ? options.limit : 20
+    const keysFilter = options.primaryKeys ?? null
+    const elements = Array.isArray(osm?.elements) ? osm.elements : []
+    const present = new Set(
+        elements.map((element) => osmElementId(element.type, element.id))
+    )
+    const ids = []
+    for (const element of elements) {
+        if (ids.length >= limit) break
+        if (
+            element.type !== 'relation' ||
+            element.tags?.type !== 'multipolygon' ||
+            !isFilteredByKeys(element.tags, keysFilter) ||
+            isLargeSurface(element.tags, keysFilter)
+        ) {
+            continue
+        }
+        const members = normalizeRelationMembers(element.members)
+        if (members.length > MAX_SUPPLEMENTED_RELATION_MEMBERS) continue
+        const isIncomplete = members.some(
+            (member) =>
+                member.type !== 'node' &&
+                isRingRole(member.role) &&
+                !present.has(osmElementId(member.type, member.ref))
+        )
+        if (isIncomplete) ids.push(element.id)
+    }
+    return ids
+}
+
+// Elements that only complete the geometry of a relation of the answer: they
+// lie outside of the area, so they are never part of the result themselves.
+const collectSupplementalElements = (answerElements, supplementalElements) => {
+    if (!Array.isArray(supplementalElements)) return []
+    const seen = new Set(
+        answerElements.map((element) => osmElementId(element.type, element.id))
+    )
+    const typeOrder = { node: 0, way: 1, relation: 2 }
+    const supplement = []
+    for (const element of supplementalElements) {
+        if (!element || !(element.type in typeOrder)) continue
+        const id = osmElementId(element.type, element.id)
+        if (seen.has(id)) continue
+        seen.add(id)
+        supplement.push(element)
+    }
+    return supplement.sort(
+        (first, second) => typeOrder[first.type] - typeOrder[second.type]
+    )
 }
 
 export const convert = (osmData, options) => {
@@ -546,7 +757,13 @@ export const convert = (osmData, options) => {
         const rel = { ..._rel }
         const members = []
         rel['tainted'] = false
-        for (const member of normalizeRelationMembers(rel.members)) {
+        for (const roleMember of normalizeRelationMembers(rel.members)) {
+            // Node members (label, admin_centre...) never draw a ring, and an
+            // empty role is read as outer like the OSM tools do.
+            if (roleMember.type === 'node') continue
+            const role = roleMember.role === '' ? 'outer' : roleMember.role
+            if (role !== 'outer' && role !== 'inner') continue
+            const member = { ...roleMember, role }
             const memberId = osmElementId(member.type, member.ref)
             const geometry = _features[memberId]?.geometry
 
@@ -743,10 +960,9 @@ export const convert = (osmData, options) => {
 
     const polygonGeometryToLines = (geometry) => {
         if (geometry.type === 'Polygon') {
-            return {
-                type: 'LineString',
-                coordinates: geometry.coordinates[0],
-            }
+            return geometry.coordinates.length === 1
+                ? { type: 'LineString', coordinates: geometry.coordinates[0] }
+                : { type: 'MultiLineString', coordinates: geometry.coordinates }
         }
         return {
             type: 'MultiLineString',
@@ -757,6 +973,7 @@ export const convert = (osmData, options) => {
     const extractOsmGoData = (_features, tagConfig, primaryKeys) => {
         const featuresResult = []
         for (const idObject in _features) {
+            if (supplementalIds.has(idObject)) continue
             const f = _features[idObject]
 
             if (f.properties.type == 'node') {
@@ -803,15 +1020,7 @@ export const convert = (osmData, options) => {
                     f.properties.tags &&
                     isFilteredByKeys(f.properties.tags, keysFilter)
                 ) {
-                    // transform geom
-                    if (
-                        f.geometry.type == 'Polygon' ||
-                        f.geometry.type == 'MultiPolygon'
-                    ) {
-                        if (!wayIsRealyPolygon(f.properties.tags)) {
-                            f.geometry = polygonGeometryToLines(f.geometry)
-                        }
-                    }
+                    // a multipolygon relation is an area whatever its tags are
                     wayToPoint(f)
                     if (tagConfig) {
                         const primaryTag = getPrimaryKeyOfObject(f, primaryKeys)
@@ -835,7 +1044,20 @@ export const convert = (osmData, options) => {
     const multiPolygonIds = []
     const _features = []
     const relationElements = []
-    for (const el of osm.elements) {
+    const supplementalElements = collectSupplementalElements(
+        osm.elements,
+        options?.supplementalElements
+    )
+    const supplementalIds = new Set(
+        supplementalElements.map((element) =>
+            osmElementId(element.type, element.id)
+        )
+    )
+    const elements =
+        supplementalElements.length > 0
+            ? [...osm.elements, ...supplementalElements]
+            : osm.elements
+    for (const el of elements) {
         if (el.type === 'node') {
             const node = el
             const n = {
@@ -1030,6 +1252,22 @@ export const convert = (osmData, options) => {
         options.primaryKeys
     )
 
+    // Objects of the answer whose geometry cannot be built (a member of a
+    // relation lies outside of the area): they exist, so the cache keeps them.
+    const incompleteIds = new Set()
+    for (const id in _features) {
+        const f = _features[id]
+        if (supplementalIds.has(id)) continue
+        if (
+            f.properties.type !== 'node' &&
+            !f.geometry &&
+            f.properties.tags &&
+            isFilteredByKeys(f.properties.tags, keysFilter)
+        ) {
+            incompleteIds.add(f.id)
+        }
+    }
+
     const geojson = {
         type: 'FeatureCollection',
         features: featuresResult,
@@ -1054,7 +1292,8 @@ export const convert = (osmData, options) => {
                 options.oldGeojson,
                 geojson,
                 newFeatureBbox,
-                options.geojsonChanged
+                options.geojsonChanged,
+                incompleteIds
             )
             const newBboxGeojson = mergeBounds(
                 newFeatureBbox,

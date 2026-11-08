@@ -8,8 +8,10 @@ export class FilterExcludeTagByCountryCode {
     transform(items: TagConfig[], countryCode: string): TagConfig[] {
         return items.filter(
             (item) =>
-                !item.excludeCountryCodes ||
-                !item.excludeCountryCodes.includes(countryCode)
+                (!item.countryCodes ||
+                    item.countryCodes.includes(countryCode)) &&
+                (!item.excludeCountryCodes ||
+                    !item.excludeCountryCodes.includes(countryCode))
         )
     }
 }

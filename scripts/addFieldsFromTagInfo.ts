@@ -8,10 +8,9 @@
 
 import type { PresetOption } from '@osmgo/type'
 import fs from 'fs'
-import stringify from 'json-stringify-pretty-compact'
 import { fetchJson } from './_fetch'
 import { tapPresetsPath } from './_paths'
-import { readTapPresetsFromJson } from './_utils'
+import { readTapPresetsFromJson, stringifyCatalog } from './_utils'
 
 const presetsOsmgo = readTapPresetsFromJson()
 
@@ -73,7 +72,7 @@ const run = async (): Promise<void> => {
         }
     }
 
-    fs.writeFileSync(tapPresetsPath, stringify(presetsOsmgo), 'utf8')
+    fs.writeFileSync(tapPresetsPath, stringifyCatalog(presetsOsmgo), 'utf8')
 }
 
 run()

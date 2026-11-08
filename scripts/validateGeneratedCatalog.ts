@@ -7,6 +7,8 @@ import {
     tapPresetsPath,
     tapTagsPath,
 } from './_paths'
+import { isUnsupportedField, MULTI_VALUE_FIELD_TYPES } from './_utils'
+import { isUnusableTileTemplate } from './basemap-utils'
 import { convert, getConfigTag } from './osmToOsmgo/index.js'
 
 interface TagConfig {
@@ -16,12 +18,24 @@ interface TagConfig {
     moreFields?: string[]
     geometry: string[]
     tags: Record<string, string | number>
+    addTags?: Record<string, string | number>
+    lbl?: Record<string, string>
+    deprecated?: boolean
+    matchScore?: number
+}
+
+interface PresetOption {
+    v: string
+    countryCodes?: string[]
+    excludeCountryCodes?: string[]
 }
 
 interface Preset {
     key?: string
     keys?: string[]
-    options?: Array<{ v: string }>
+    type?: string
+    iDtype?: string
+    options?: PresetOption[]
 }
 
 type CatalogGeometry = 'point' | 'vertex' | 'line' | 'area' | 'relation'
@@ -31,6 +45,7 @@ interface ConvertedFeature {
     geometry: { type: string }
     properties: {
         type: string
+        configId?: string
         usedByWays?: string[]
         way_geometry?: { type: string }
     }
@@ -59,6 +74,37 @@ const unique = (values: string[], label: string): void => {
     assert.equal(new Set(values).size, values.length, `${label} must be unique`)
 }
 
+// A brand can have one option per country variant (McDonald's in Ukraine):
+// a value picks a single option wherever it is offered.
+const assertOneBrandOptionPerCountry = (
+    presetId: string,
+    options: PresetOption[]
+): void => {
+    const byValue = new Map<string, PresetOption[]>()
+    for (const option of options) {
+        byValue.set(option.v, [...(byValue.get(option.v) ?? []), option])
+    }
+    for (const variants of byValue.values()) {
+        if (variants.length === 1) continue
+        const worldwide = variants.filter((option) => !option.countryCodes)
+        assert.ok(
+            worldwide.length <= 1,
+            `${presetId} offers ${variants[0].v} twice worldwide`
+        )
+        const regionalCodes = variants.flatMap(
+            (option) => option.countryCodes ?? []
+        )
+        unique(regionalCodes, `${presetId} countries of ${variants[0].v}`)
+        assert.ok(
+            regionalCodes.every(
+                (code) =>
+                    worldwide[0]?.excludeCountryCodes?.includes(code) ?? true
+            ),
+            `${presetId} offers ${variants[0].v} twice in a country`
+        )
+    }
+}
+
 const fixtureBounds = {
     minlat: 0,
     minlon: 0,
@@ -72,8 +118,20 @@ const fixtureNodes = [
     { type: 'node', id: 4, lat: 0.01, lon: 0 },
 ]
 
+type TagValues = Record<string, string | number>
+
+// iD writes "*" for "any value": a concrete object carries "yes" instead.
+const concreteTags = (tags: TagValues): TagValues =>
+    Object.fromEntries(
+        Object.entries(tags).map(([key, value]) => [
+            key,
+            value === '*' ? 'yes' : value,
+        ])
+    )
+
 const relationElements = (
-    tag: TagConfig
+    tag: TagConfig,
+    tags: TagValues
 ): { elements: Array<Record<string, unknown>>; featureId: string } => {
     if (tag.tags.type === 'multipolygon') {
         return {
@@ -83,7 +141,7 @@ const relationElements = (
                 {
                     type: 'relation',
                     id: 20,
-                    tags: tag.tags,
+                    tags,
                     members: [{ type: 'way', ref: 10, role: 'outer' }],
                 },
             ],
@@ -98,7 +156,7 @@ const relationElements = (
                 {
                     type: 'relation',
                     id: 20,
-                    tags: tag.tags,
+                    tags,
                     members: [{ type: 'way', ref: 10, role: '' }],
                 },
             ],
@@ -115,7 +173,7 @@ const relationElements = (
                 {
                     type: 'relation',
                     id: 20,
-                    tags: tag.tags,
+                    tags,
                     members: [{ type: 'node', ref: 1, role: 'stop' }],
                 },
             ],
@@ -129,14 +187,15 @@ const relationElements = (
 
 const geometryFixture = (
     tag: TagConfig,
-    geometry: CatalogGeometry
+    geometry: CatalogGeometry,
+    objectTags: TagValues
 ): { elements: Array<Record<string, unknown>>; featureId: string } => {
-    if (geometry === 'relation') return relationElements(tag)
+    if (geometry === 'relation') return relationElements(tag, objectTags)
 
     const tags =
-        geometry === 'area' && tag.tags.area === undefined
-            ? { ...tag.tags, area: 'yes' }
-            : tag.tags
+        geometry === 'area' && objectTags.area === undefined
+            ? { ...objectTags, area: 'yes' }
+            : objectTags
     if (geometry === 'point') {
         return {
             elements: [{ ...fixtureNodes[0], tags }],
@@ -168,11 +227,12 @@ const geometryFixture = (
     }
 }
 
-const assertGeometryIsRendered = (
+const convertFixture = (
     tag: TagConfig,
-    geometry: CatalogGeometry
-): void => {
-    const fixture = geometryFixture(tag, geometry)
+    geometry: CatalogGeometry,
+    objectTags: TagValues
+): ConvertedFeature | undefined => {
+    const fixture = geometryFixture(tag, geometry, objectTags)
     const result = convert(
         { bounds: fixtureBounds, elements: fixture.elements },
         {
@@ -180,9 +240,16 @@ const assertGeometryIsRendered = (
             primaryKeys: tagsConfig.primaryKeys,
         }
     )
-    const feature = result.geojson.features.find(
+    return result.geojson.features.find(
         (candidate: ConvertedFeature) => candidate.id === fixture.featureId
     ) as ConvertedFeature | undefined
+}
+
+const assertGeometryIsRendered = (
+    tag: TagConfig,
+    geometry: CatalogGeometry
+): void => {
+    const feature = convertFixture(tag, geometry, concreteTags(tag.tags))
     assert.ok(feature, `${tag.id} cannot render declared ${geometry} geometry`)
 
     const sourceGeometry = feature.properties.way_geometry ?? feature.geometry
@@ -206,6 +273,51 @@ const assertGeometryIsRendered = (
     )
 }
 
+const roundTripProblems: string[] = []
+
+const isSubsetOf = (tags: TagValues, supersetTags: TagValues): boolean =>
+    Object.entries(tags).every(([key, value]) => {
+        const other = supersetTags[key]
+        return (
+            other !== undefined &&
+            (value === '*' || other === '*' || String(other) === String(value))
+        )
+    })
+
+// Converting what a category writes (its tags, then its tags and addTags)
+// must give the category back, or a more specific one that carries all of its
+// tags.
+const checkRoundTrip = (
+    tag: TagConfig,
+    geometry: CatalogGeometry,
+    objectTags: TagValues,
+    label: string
+): void => {
+    const feature = convertFixture(tag, geometry, concreteTags(objectTags))
+    const resolvedId = feature?.properties.configId
+    if (!resolvedId || resolvedId === tag.id) {
+        if (!resolvedId) {
+            roundTripProblems.push(`${tag.id} (${geometry}, ${label}) is lost`)
+        }
+        return
+    }
+    const resolved = tagsConfig.tags.find(
+        (candidate) => candidate.id === resolvedId
+    )
+    if (resolved && isSubsetOf(tag.tags, resolved.tags)) return
+    // iD scores the road bridge below the road it is made of on purpose
+    if (
+        resolved &&
+        tag.id.startsWith(`${resolved.id}/`) &&
+        (tag.matchScore ?? 1) < (resolved.matchScore ?? 1)
+    ) {
+        return
+    }
+    roundTripProblems.push(
+        `${tag.id} (${geometry}, ${label}) resolves to ${resolvedId}`
+    )
+}
+
 const supportedGeometries = new Set([
     'point',
     'vertex',
@@ -213,13 +325,17 @@ const supportedGeometries = new Set([
     'area',
     'relation',
 ])
+const withoutFrenchLabel: string[] = []
 const tagIds = tagsConfig.tags.map((tag) => tag.id)
 const presetIds = Object.keys(presets)
 const spriteIds = Object.keys(sprites)
+// About 15 % above the generated sizes of November 2026 (tags 5.36 MB,
+// presets 2.15 MB, brands 4.95 MB): an iD or NSI update fits, a jump beyond
+// is a drift to look at before raising a budget.
 const generatedFileBudgets = new Map([
-    [tapTagsPath, 8_000_000],
-    [tapPresetsPath, 3_500_000],
-    [tapBrandPresetsPath, 6_500_000],
+    [tapTagsPath, 6_200_000],
+    [tapPresetsPath, 2_500_000],
+    [tapBrandPresetsPath, 5_700_000],
     [path.join(assetsDir, 'imagery.json'), 1_000_000],
 ])
 
@@ -263,8 +379,20 @@ for (const tag of tagsConfig.tags) {
         (candidate) =>
             candidate.id === tag.id || tag.id.startsWith(`${candidate.id}/`)
     )
+    const isBrandList = (presetId: string): boolean =>
+        presetId.endsWith('#brand')
+    const hasOwnBrands = tag.presets.some(isBrandList)
     const expectedPresets = [
-        ...new Set(ancestors.flatMap((ancestor) => ancestor.presets)),
+        ...new Set(
+            ancestors.flatMap((ancestor) =>
+                ancestor.presets.filter(
+                    (presetId) =>
+                        ancestor === tag ||
+                        !hasOwnBrands ||
+                        !isBrandList(presetId)
+                )
+            )
+        ),
     ]
     const expectedMoreFields = [
         ...new Set(ancestors.flatMap((ancestor) => ancestor.moreFields ?? [])),
@@ -307,15 +435,72 @@ for (const tag of tagsConfig.tags) {
     }
     for (const geometry of tag.geometry as CatalogGeometry[]) {
         assertGeometryIsRendered(tag, geometry)
+        checkRoundTrip(tag, geometry, tag.tags, 'tags')
+        checkRoundTrip(
+            tag,
+            geometry,
+            { ...tag.tags, ...tag.addTags },
+            'tags and addTags'
+        )
     }
     for (const presetId of [...tag.presets, ...(tag.moreFields ?? [])]) {
         assert.ok(presets[presetId], `${tag.id} references missing ${presetId}`)
+        assert.ok(
+            !isUnsupportedField(presets[presetId]),
+            `${tag.id} references ${presetId}, a field keyed by a prefix that is not a multiCombo`
+        )
     }
-    if (tag.icon) {
-        assert.ok(sprites[tag.icon], `${tag.id} references missing ${tag.icon}`)
+    assert.ok(tag.icon, `${tag.id} must have an icon`)
+    assert.ok(sprites[tag.icon], `${tag.id} references missing ${tag.icon}`)
+    if (!tag.lbl?.fr) {
+        withoutFrenchLabel.push(tag.id)
     }
 }
 
+// A school, a station or a bus stop housed in a building stays what it is:
+// like iD, a building only wins over the categories that score below it
+// (barrier=wall, public_transport=station).
+const buildingScore =
+    tagsConfig.tags.find((tag) => tag.id === 'building/yes')?.matchScore ?? 1
+for (const tag of tagsConfig.tags) {
+    if (
+        tag.deprecated ||
+        'building' in tag.tags ||
+        'building' in (tag.addTags ?? {}) ||
+        (tag.matchScore ?? 1) < buildingScore
+    ) {
+        continue
+    }
+    const geometry = (
+        tag.geometry.includes('area') ? 'area' : tag.geometry[0]
+    ) as CatalogGeometry
+    if (geometry === 'relation') continue
+    checkRoundTrip(
+        tag,
+        geometry,
+        { ...tag.tags, building: 'yes' },
+        'tags and building=yes'
+    )
+    checkRoundTrip(
+        tag,
+        geometry,
+        { ...tag.tags, ...tag.addTags, building: 'yes' },
+        'tags, addTags and building=yes'
+    )
+}
+
+for (const primaryKey of tagsConfig.primaryKeys) {
+    assert.ok(
+        tagsConfig.tags.some((tag) => primaryKey in tag.tags),
+        `Primary key ${primaryKey} is not used by any category`
+    )
+}
+
+assert.deepEqual(
+    roundTripProblems,
+    [],
+    'Converting what a category writes must give the category back'
+)
 assert.ok(sprites['maki-circle'], 'The fallback map icon must exist')
 for (const [presetId, preset] of Object.entries(presets)) {
     const fieldKeys = [
@@ -327,11 +512,70 @@ for (const [presetId, preset] of Object.entries(presets)) {
         `${presetId} must define valid field keys`
     )
     unique(preset.keys ?? [], `${presetId} alternative field keys`)
-    unique(
-        (preset.options ?? []).map((option) => option.v),
-        `${presetId} option values`
+    if (presetId.endsWith('#brand')) {
+        assertOneBrandOptionPerCountry(presetId, preset.options ?? [])
+    } else {
+        unique(
+            (preset.options ?? []).map((option) => option.v),
+            `${presetId} option values`
+        )
+    }
+    // only a multiCombo writes under a key prefix (payment:cash=yes)
+    assert.ok(
+        !isUnsupportedField(preset),
+        `${presetId} is keyed by a prefix but is not a multiCombo`
+    )
+    // a single choice would replace "pizza;italian" or male=yes by one value
+    assert.ok(
+        !MULTI_VALUE_FIELD_TYPES.includes(preset.iDtype ?? '') ||
+            preset.type === preset.iDtype,
+        `${presetId} holds several values and must keep its ${preset.iDtype} editor`
+    )
+    if (preset.type === 'manyCombo') {
+        assert.ok(
+            !preset.key &&
+                (preset.options ?? []).length > 0 &&
+                (preset.options ?? []).every((option) =>
+                    preset.keys?.includes(option.v)
+                ),
+            `${presetId} must offer one option per field key`
+        )
+    }
+    if (preset.type === 'multiCombo') {
+        assert.ok(
+            (preset.options ?? []).every(
+                (option) =>
+                    option.v.trim() &&
+                    !option.v.startsWith(':') &&
+                    !option.v.endsWith(':')
+            ),
+            `${presetId} options must complete its key prefix`
+        )
+    }
+}
+
+const imagery = JSON.parse(
+    fs.readFileSync(path.join(assetsDir, 'imagery.json'), 'utf8')
+) as Array<{ properties: { id: string; tiles: string[] } }>
+for (const layer of imagery) {
+    assert.ok(
+        !layer.properties.tiles.some(isUnusableTileTemplate),
+        `${layer.properties.id} uses a tile URL that is not https or has an unresolved placeholder`
     )
 }
+
+// The labels come from iD: they are listed, never invented. The cap keeps the
+// list from growing.
+const MAX_WITHOUT_FRENCH_LABEL = 10
+if (withoutFrenchLabel.length > 0) {
+    console.warn(
+        `${withoutFrenchLabel.length} categories have no French label: ${withoutFrenchLabel.join(', ')}`
+    )
+}
+assert.ok(
+    withoutFrenchLabel.length <= MAX_WITHOUT_FRENCH_LABEL,
+    `${withoutFrenchLabel.length} categories have no French label (${MAX_WITHOUT_FRENCH_LABEL} allowed)`
+)
 
 // Progressive floors catch accidental truncation while allowing upstream
 // cleanup without pinning an exact generated result.
