@@ -6,17 +6,13 @@
         "CONFIRM": "Подтвердить",
         "ADD": "Добавить",
         "OK": "Ок",
-        "UNKNOWN": "Неизвестно",
-        "UNDEFINED": "Неопределено",
-        "NAME": "Имя",
-        "ID": "Id",
         "CLOSE": "Закрыть",
         "LOADING": "Загрузка…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Вы уверены?",
         "EXIT_CONFIRM_MESSAGE": "Выйти из Osm Go!?",
-        "START_SNACK_ITEMS_IN_MEMORY": "объект в памяти",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} объект в памяти",
         "WHAT_ITEM": "Какой?",
         "LOAD_BBOX": "Загрузить данные?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Вы уверены?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Удалить загруженные данные? (изменения не будут удалены)",
         "SIGN_OUT": "Выйти из аккаунта",
-        "EXIT": "Выйти",
         "NEW_VERSION": "Доступна новая версия!",
         "TAG_MANAGEMENT": "Управление тегами"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "Участники © OpenStreetMap"
     },
     "LOGIN": {
-        "LOGIN": "Логин",
         "LOGIN_BUTTON": "Войти"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Удалено",
         "TOTAL_ITEMS": "Всего",
         "CHANGESET_COMMENT": "Комментарий к изменениям",
-        "TYPE": "Тип",
-        "NAME": "Имя",
         "ERROR": "Ошибка",
-        "SEND": "Отправить!",
         "DELETE": "Удалить",
         "DELETE_CONFIRM_HEADER": "Вы уверены?",
-        "DELETE_CONFIRM_MESSAGE": "Удалить все изменения?",
         "CANCEL_THIS_CHANGE": "Отменить эти изменения",
         "UPLOADING_DATA_TO_OSM": "Данные отправляются в OpenStreetMap...",
         "DONT_CLOSE": "Пожалуйста, не закрывайте эту страницу"
@@ -113,7 +103,7 @@
         "DELETE_CONFIRM_HEADER": "Вы уверены?",
         "DELETE_CONFIRM_MESSAGE": "Удалить этот объект?",
         "SELECT_CATEGORY": "Выбрать категорию",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Точка используется в {x} линии(ях)",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Точка используется в {{count}} линии(ях)",
         "UNDEFINED_VALUE": "Неизвестно",
         "LAST_TAG_USED": "Последний использованный тэг",
         "BOOKMARKS": "Закладки"

@@ -1500,7 +1500,7 @@ describe('MainPage', () => {
             shown.next()
 
             expect(alertService.showAlert).toHaveBeenCalledWith(
-                '1 MAIN.START_SNACK_ITEMS_IN_MEMORY'
+                'MAIN.START_SNACK_ITEMS_IN_MEMORY'
             )
         })
 

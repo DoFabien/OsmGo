@@ -6,8 +6,6 @@
         "CONFIRM": "Konfirmasi",
         "ADD": "Tambahkan",
         "OK": "OK",
-        "NAME": "Nama",
-        "ID": "Id",
         "CLOSE": "Tutup",
         "LOADING": "Memuat..."
     },
@@ -31,7 +29,6 @@
         "OSM_CONTRIBUTORS": "© Kontributor OpenStreetMap"
     },
     "LOGIN": {
-        "LOGIN": "Masuk",
         "LOGIN_BUTTON": "Masuk"
     },
     "SEND_DATA": {
@@ -41,13 +38,9 @@
         "UPDATED_ITEMS": "Diperbarui",
         "DELETED_ITEMS": "Dihapus",
         "TOTAL_ITEMS": "Jumlah",
-        "TYPE": "Jenis",
-        "NAME": "Nama",
         "ERROR": "Kesalahan",
-        "SEND": "Unggah!",
         "DELETE": "Hapus",
         "DELETE_CONFIRM_HEADER": "Apa Anda yakin?",
-        "DELETE_CONFIRM_MESSAGE": "Hapus semua perubahan?",
         "CANCEL_THIS_CHANGE": "Batalkan perubahan ini",
         "UPLOADING_DATA_TO_OSM": "Mengunggah perubahan ke OpenStreetMap...",
         "DONT_CLOSE": "Harap tidak menutup halaman ini"
@@ -71,7 +64,7 @@
         "PLACEHOLDER_NAME": "Nama",
         "DELETE_CONFIRM_HEADER": "Apa Anda yakin?",
         "DELETE_CONFIRM_MESSAGE": "Hapus item ini?",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Node ini digunakan oleh {x} way"
+        "THIS_NODE_IS_USED_BY_A_WAY": "Node ini digunakan oleh {{count}} way"
     },
     "ALERT": {
         "FIX": "Perbaiki"

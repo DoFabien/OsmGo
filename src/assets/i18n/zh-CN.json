@@ -6,17 +6,13 @@
         "CONFIRM": "确认",
         "ADD": "添加",
         "OK": "好",
-        "UNKNOWN": "未知",
-        "UNDEFINED": "未定义",
-        "NAME": "名称",
-        "ID": "Id",
         "CLOSE": "关闭",
         "LOADING": "加载中……"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "你确定吗？",
         "EXIT_CONFIRM_MESSAGE": "要离开Osm Go吗！？",
-        "START_SNACK_ITEMS_IN_MEMORY": "记忆中的项目",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} 记忆中的项目",
         "WHAT_ITEM": "哪一个？",
         "LOAD_BBOX": "载入数据吗？"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "你确定吗？",
         "DELETE_DATA_CONFIRM_MESSAGE": "删除已下载的数据？（变更仍会保留）",
         "SIGN_OUT": "登出",
-        "EXIT": "退出",
         "NEW_VERSION": "有新版本可用！",
         "TAG_MANAGEMENT": "标签管理"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© OpenStreetMap 贡献者"
     },
     "LOGIN": {
-        "LOGIN": "登入",
         "LOGIN_BUTTON": "登入"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "已删除",
         "TOTAL_ITEMS": "总计",
         "CHANGESET_COMMENT": "变更集评论",
-        "TYPE": "类型",
-        "NAME": "名称",
         "ERROR": "错误",
-        "SEND": "上传！",
         "DELETE": "删除",
         "DELETE_CONFIRM_HEADER": "你确定吗？",
-        "DELETE_CONFIRM_MESSAGE": "删除所有更改？",
         "CANCEL_THIS_CHANGE": "取消这一改动",
         "UPLOADING_DATA_TO_OSM": "正在上传变更至OpenStreetMap……",
         "DONT_CLOSE": "请不要关闭此页面"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "你确定？",
         "DELETE_CONFIRM_MESSAGE": "删除此项目？",
         "SELECT_CATEGORY": "选择一个类别",
-        "THIS_NODE_IS_USED_BY_A_WAY": "该节点被路径 {x} 所使用",
+        "THIS_NODE_IS_USED_BY_A_WAY": "该节点被路径 {{count}} 所使用",
         "UNDEFINED_VALUE": "未知",
         "LAST_TAG_USED": "最后使用过的标签",
         "BOOKMARKS": "书签"

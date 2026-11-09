@@ -6,17 +6,13 @@
         "CONFIRM": "Bestätigen",
         "ADD": "Hinzufügen",
         "OK": "Ok",
-        "UNKNOWN": "Unbekannt",
-        "UNDEFINED": "Unbestimmt",
-        "NAME": "Name",
-        "ID": "ID",
         "CLOSE": "Schließen",
         "LOADING": "Laden…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Sicher?",
         "EXIT_CONFIRM_MESSAGE": "Möchtest du Osm Go! wirklich verlassen?",
-        "START_SNACK_ITEMS_IN_MEMORY": "Gespeicherte Elemente",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} Gespeicherte Elemente",
         "WHAT_ITEM": "Welches?",
         "LOAD_BBOX": "Daten laden?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Sicher?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Heruntergeladene Daten löschen? (Änderungen werden behalten)",
         "SIGN_OUT": "Abmelden",
-        "EXIT": "Schließen",
         "NEW_VERSION": "Eine neue Version ist verfügbar!",
         "TAG_MANAGEMENT": "Tag-Verwaltung"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© OpenStreetMap-Mitwirkende"
     },
     "LOGIN": {
-        "LOGIN": "Anmelden",
         "LOGIN_BUTTON": "Anmelden"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Entfernt",
         "TOTAL_ITEMS": "Gesamt",
         "CHANGESET_COMMENT": "Changeset-Kommentar",
-        "TYPE": "Eingabe",
-        "NAME": "Name",
         "ERROR": "Fehler",
-        "SEND": "Senden!",
         "DELETE": "Entfernen",
         "DELETE_CONFIRM_HEADER": "Sicher?",
-        "DELETE_CONFIRM_MESSAGE": "Alle Änderungen löschen?",
         "CANCEL_THIS_CHANGE": "Diese Änderung verwerfen",
         "UPLOADING_DATA_TO_OSM": "Änderungen werden auf OpenStreetMap hochgeladen ...",
         "DONT_CLOSE": "Bitte schließe nicht diese Seite"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Sicher?",
         "DELETE_CONFIRM_MESSAGE": "Dieses Element entfernen?",
         "SELECT_CATEGORY": "Wähle eine Kategorie",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Dieser Punkt wird von {x} Linie(n) verwendet",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Dieser Punkt wird von {{count}} Linie(n) verwendet",
         "UNDEFINED_VALUE": "Unbekannt",
         "LAST_TAG_USED": "Letzte verwendete tags",
         "BOOKMARKS": "Lesezeichen"

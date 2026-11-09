@@ -6,17 +6,13 @@
         "CONFIRM": "Confirmar",
         "ADD": "Afegir",
         "OK": "D'acord",
-        "UNKNOWN": "Desconegut",
-        "UNDEFINED": "Indefinit",
-        "NAME": "Nom",
-        "ID": "Id",
         "CLOSE": "Tancar",
         "LOADING": "Carregant..."
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Estàs segur/a?",
         "EXIT_CONFIRM_MESSAGE": "Marxar de Osm Go!?",
-        "START_SNACK_ITEMS_IN_MEMORY": "ítems a la memòria",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} ítems a la memòria",
         "WHAT_ITEM": "Quin?",
         "LOAD_BBOX": "Carregar dades?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Estàs segur/a?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Esborrar dades baixades? (els canvis es mantenen)",
         "SIGN_OUT": "Sortir",
-        "EXIT": "Sortida",
         "NEW_VERSION": "Nova versió disponible.",
         "TAG_MANAGEMENT": "Gestió d'etiquetes"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© contribuïdors/es a OpenStreetMap"
     },
     "LOGIN": {
-        "LOGIN": "Entrar",
         "LOGIN_BUTTON": "Entrar"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Esborrat",
         "TOTAL_ITEMS": "Total",
         "CHANGESET_COMMENT": "Comentari al conjunt de canvis",
-        "TYPE": "Tipus",
-        "NAME": "Nom",
         "ERROR": "Error",
-        "SEND": "Pujar",
         "DELETE": "Esborrar",
         "DELETE_CONFIRM_HEADER": "Estàs segur/a?",
-        "DELETE_CONFIRM_MESSAGE": "Esborrar tots els canvis?",
         "CANCEL_THIS_CHANGE": "Cancel·lar aquest canvi",
         "UPLOADING_DATA_TO_OSM": "Pujant canvis a OpenStreetMap...",
         "DONT_CLOSE": "No tanquis aquesta pàgina"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Estàs segur/a?",
         "DELETE_CONFIRM_MESSAGE": "Esborrar aquest ítem?",
         "SELECT_CATEGORY": "Seleccionar una categoria",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Aquest node s'utilitza en {x} via(es)",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Aquest node s'utilitza en {{count}} via(es)",
         "UNDEFINED_VALUE": "Desconegut",
         "LAST_TAG_USED": "Etiquetes emprades darrerament",
         "BOOKMARKS": "Favorits"

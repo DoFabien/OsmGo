@@ -6,17 +6,13 @@
         "CONFIRM": "Conferma",
         "ADD": "Aggiungi",
         "OK": "Ok",
-        "UNKNOWN": "Sconosciuto",
-        "UNDEFINED": "Non definito",
-        "NAME": "Nome",
-        "ID": "ID",
         "CLOSE": "Chiudi",
         "LOADING": "Caricamento…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Si è sicuri?",
         "EXIT_CONFIRM_MESSAGE": "Uscire da Osm Go!?",
-        "START_SNACK_ITEMS_IN_MEMORY": "Elementi in memoria",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} Elementi in memoria",
         "WHAT_ITEM": "Quale?",
         "LOAD_BBOX": "Caricare dati?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Si è sicuri?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Cancellare i dati scaricati? (le modifiche vengono mantenute)",
         "SIGN_OUT": "Fai il logout",
-        "EXIT": "Esci",
         "NEW_VERSION": "È disponibile una nuova versione!",
         "TAG_MANAGEMENT": "Gestione dei tag"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© OpenStreetMap contributors"
     },
     "LOGIN": {
-        "LOGIN": "Accedi",
         "LOGIN_BUTTON": "Accedi"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Cancellati",
         "TOTAL_ITEMS": "Totale",
         "CHANGESET_COMMENT": "Commento al changeset",
-        "TYPE": "Tipo",
-        "NAME": "Nome",
         "ERROR": "Errore",
-        "SEND": "Carica!",
         "DELETE": "Cancella",
         "DELETE_CONFIRM_HEADER": "Si è sicuri?",
-        "DELETE_CONFIRM_MESSAGE": "Cancellare tutte le modifiche?",
         "CANCEL_THIS_CHANGE": "Annulla questa modifica",
         "UPLOADING_DATA_TO_OSM": "Caricamento delle modifiche su OpenStreetMap…",
         "DONT_CLOSE": "Non chiudere questa pagina"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Si è sicuri?",
         "DELETE_CONFIRM_MESSAGE": "Cancellare questo elemento?",
         "SELECT_CATEGORY": "Seleziona un categoria",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Questo nodo è uasto da {x} percorso/i",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Questo nodo è uasto da {{count}} percorso/i",
         "UNDEFINED_VALUE": "Sconosciuto",
         "LAST_TAG_USED": "Ultimi tag usati",
         "BOOKMARKS": "Segnalibri"

@@ -6,17 +6,13 @@
         "CONFIRM": "Potwierdź",
         "ADD": "Dodaj",
         "OK": "Ok",
-        "UNKNOWN": "Nieznane",
-        "UNDEFINED": "Nieokreślono",
-        "NAME": "Nazwa",
-        "ID": "ID",
         "CLOSE": "Zamknij",
         "LOADING": "Wczytywanie…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Na pewno?",
         "EXIT_CONFIRM_MESSAGE": "Czy na pewno chcesz wyjść z Osm Go!?",
-        "START_SNACK_ITEMS_IN_MEMORY": "elementów w pamięci",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} elementów w pamięci",
         "WHAT_ITEM": "Co chcesz wybrać?",
         "LOAD_BBOX": "Wczytać dane?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Na pewno?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Czy na pewno chcesz usunąć dane pobierania? (edycje zostaną zachowane)",
         "SIGN_OUT": "Wyloguj",
-        "EXIT": "Wyjdź",
         "NEW_VERSION": "Dostępna jest nowa wersja!",
         "TAG_MANAGEMENT": "Zarządzanie tagami"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© autorzy OpenStreetMap"
     },
     "LOGIN": {
-        "LOGIN": "Zaloguj się",
         "LOGIN_BUTTON": "Zaloguj się"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Usunięte",
         "TOTAL_ITEMS": "Łącznie",
         "CHANGESET_COMMENT": "Komentarz do zestawu zmian",
-        "TYPE": "Rodzaj",
-        "NAME": "Nazwa",
         "ERROR": "Błąd",
-        "SEND": "Wyślij!",
         "DELETE": "Usuń",
         "DELETE_CONFIRM_HEADER": "Na pewno?",
-        "DELETE_CONFIRM_MESSAGE": "Chcesz usunąć wszystkie zmiany?",
         "CANCEL_THIS_CHANGE": "Anuluj zmianę",
         "UPLOADING_DATA_TO_OSM": "Wysyłanie zmian do OpenStreetMap...",
         "DONT_CLOSE": "Nie zamykaj tej strony"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Na pewno?",
         "DELETE_CONFIRM_MESSAGE": "Czy na pewno chcesz usunąć tę pozycję?",
         "SELECT_CATEGORY": "Wybierz kategorię",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Tego węzła używa następująca liczba linii: {x}",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Tego węzła używa następująca liczba linii: {{count}}",
         "UNDEFINED_VALUE": "Nieokreślono",
         "LAST_TAG_USED": "Ostatnio użyte tagi",
         "BOOKMARKS": "Zakładki"

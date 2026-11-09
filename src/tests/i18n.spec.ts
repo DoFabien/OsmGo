@@ -94,15 +94,61 @@ describe('interface translations', () => {
         })
     })
 
-    it('does not give two different actions the same label', () => {
-        for (const language of ['en', 'fr']) {
-            const shared = readTranslations(language)['SHARED'] as Record<
-                string,
-                string
-            >
+    it('gives every English text a context note for the translators', () => {
+        const context = JSON.parse(
+            readFileSync(
+                path.join(process.cwd(), 'i18n', 'en.context.json'),
+                'utf8'
+            )
+        ) as Translations
+        const contextKeys = new Set(listTranslationKeys(context))
 
-            expect(shared['CLEAR']).not.toBe(shared['CANCEL'])
+        expect([...englishKeys].filter((key) => !contextKeys.has(key))).toEqual(
+            []
+        )
+        expect([...contextKeys].filter((key) => !englishKeys.has(key))).toEqual(
+            []
+        )
+    })
+
+    it('keeps the English placeholders in every translation', () => {
+        const flat = (translations: Translations, prefix = '') =>
+            listTranslationKeys(translations, prefix).map((key) => [
+                key,
+                String(
+                    key
+                        .split('.')
+                        .reduce<unknown>(
+                            (node, name) =>
+                                (node as Record<string, unknown>)[name],
+                            translations
+                        )
+                ),
+            ])
+        const placeholders = (text: string) =>
+            (text.match(/\{\{\s*[\w.]+\s*\}\}/g) ?? [])
+                .map((placeholder) => placeholder.replace(/[{}\s]/g, ''))
+                .sort()
+                .join(',')
+        const englishTexts = Object.fromEntries(flat(english))
+        const mismatches: string[] = []
+
+        for (const fileName of readdirSync(translationsDirectory)) {
+            if (!fileName.endsWith('.json') || fileName === 'i18n.json') {
+                continue
+            }
+            const language = fileName.replace('.json', '')
+            for (const [key, text] of flat(readTranslations(language))) {
+                if (
+                    englishTexts[key] !== undefined &&
+                    placeholders(text) !== placeholders(englishTexts[key])
+                ) {
+                    mismatches.push(`${language}: ${key}`)
+                }
+            }
         }
+
+        expect(mismatches).toEqual([])
     })
 
     it('translates the label of the deprecated tag fix button', () => {

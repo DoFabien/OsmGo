@@ -6,17 +6,13 @@
         "CONFIRM": "確認",
         "ADD": "追加",
         "OK": "OK",
-        "UNKNOWN": "不明",
-        "UNDEFINED": "未定義",
-        "NAME": "名前",
-        "ID": "ID",
         "CLOSE": "閉じる",
         "LOADING": "読み込み中..."
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "本当によろしいですか？",
         "EXIT_CONFIRM_MESSAGE": "Osm Go!? を終了しますか？",
-        "START_SNACK_ITEMS_IN_MEMORY": "件の項目が記憶域内にあります",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} 件の項目が記憶域内にあります",
         "WHAT_ITEM": "どれですか？",
         "LOAD_BBOX": "データを読み込みますか？"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "本当によろしいですか？",
         "DELETE_DATA_CONFIRM_MESSAGE": "ダウンロードしたデータを削除しますか？（変更は保持されます）",
         "SIGN_OUT": "ログアウト",
-        "EXIT": "終了",
         "NEW_VERSION": "新バージョンが利用できます!",
         "TAG_MANAGEMENT": "タグ管理"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© OpenStreetMap contributors"
     },
     "LOGIN": {
-        "LOGIN": "ログイン",
         "LOGIN_BUTTON": "ログイン"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "削除済",
         "TOTAL_ITEMS": "合計",
         "CHANGESET_COMMENT": "変更セットコメント",
-        "TYPE": "種別",
-        "NAME": "名前",
         "ERROR": "エラー",
-        "SEND": "アップロード!",
         "DELETE": "削除",
         "DELETE_CONFIRM_HEADER": "本当によろしいですか？",
-        "DELETE_CONFIRM_MESSAGE": "変更をすべて削除しますか？",
         "CANCEL_THIS_CHANGE": "この変更をキャンセル",
         "UPLOADING_DATA_TO_OSM": "OpenStreetMapへの変更をアップロード中...",
         "DONT_CLOSE": "このページを閉じないでください"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "本当によろしいですか？",
         "DELETE_CONFIRM_MESSAGE": "この項目を削除しますか？",
         "SELECT_CATEGORY": "カテゴリーを選択",
-        "THIS_NODE_IS_USED_BY_A_WAY": "このノードは{x}件のウェイで使われています",
+        "THIS_NODE_IS_USED_BY_A_WAY": "このノードは{{count}}件のウェイで使われています",
         "UNDEFINED_VALUE": "不明",
         "LAST_TAG_USED": "最新利用タグ",
         "BOOKMARKS": "ブックマーク"

@@ -6,17 +6,13 @@
         "CONFIRM": "Bevestigen",
         "ADD": "Toevoegen",
         "OK": "Ok",
-        "UNKNOWN": "Onbekend",
-        "UNDEFINED": "Ongedefinieerd",
-        "NAME": "Naam",
-        "ID": "Id",
         "CLOSE": "Sluiten",
         "LOADING": "Laden..."
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Weet je het zeker?",
         "EXIT_CONFIRM_MESSAGE": "Osm Go! verlaten?",
-        "START_SNACK_ITEMS_IN_MEMORY": "items in geheugen",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} items in geheugen",
         "WHAT_ITEM": "Welke?",
         "LOAD_BBOX": "Gegevens laden?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Weet je het zeker?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Gedownloade gegevens verwijderen? (veranderingen blijven behouden)",
         "SIGN_OUT": "Uitloggen",
-        "EXIT": "Uit menu gaan",
         "NEW_VERSION": "Nieuwe versie beschikbaar!",
         "TAG_MANAGEMENT": "Tagbeheer"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© OpenStreetMap-bijdragers"
     },
     "LOGIN": {
-        "LOGIN": "Inloggen",
         "LOGIN_BUTTON": "Inloggen"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Verwijderd",
         "TOTAL_ITEMS": "Totaal",
         "CHANGESET_COMMENT": "Opmerking bij wijzigingenset",
-        "TYPE": "Type",
-        "NAME": "Naam",
         "ERROR": "Fout",
-        "SEND": "Uploaden!",
         "DELETE": "Verwijderen",
         "DELETE_CONFIRM_HEADER": "Weet je het zeker?",
-        "DELETE_CONFIRM_MESSAGE": "Alle veranderingen verwijderen?",
         "CANCEL_THIS_CHANGE": "Deze verandering annuleren",
         "UPLOADING_DATA_TO_OSM": "Veranderingen naar OpenStreetMap uploaden...",
         "DONT_CLOSE": "Sluit alstublieft deze pagina niet"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Weet je het zeker?",
         "DELETE_CONFIRM_MESSAGE": "Dit item verwijderen?",
         "SELECT_CATEGORY": "Een categorie selecteren",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Deze knoop wordt gebruikt door {x} weg(en)",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Deze knoop wordt gebruikt door {{count}} weg(en)",
         "UNDEFINED_VALUE": "Onbekend",
         "LAST_TAG_USED": "Laatst gebruikte tags",
         "BOOKMARKS": "Bladwijzers"

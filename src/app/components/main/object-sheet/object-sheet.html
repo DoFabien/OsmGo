@@ -205,8 +205,8 @@
                 >warning</mat-icon
             >
             <p>
-                {{ ('MODAL_SELECTED_ITEM.THIS_NODE_IS_USED_BY_A_WAY' |
-                translate).replace('{x}', count) }}
+                {{ 'MODAL_SELECTED_ITEM.THIS_NODE_IS_USED_BY_A_WAY' | translate:
+                { count } }}
             </p>
         </section>
         } @if (feature().properties.changeType) {

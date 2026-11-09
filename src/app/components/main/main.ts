@@ -971,7 +971,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
             .subscribe(() => {
                 const snackBarRef = this.snackBar.open(
                     this.translate.instant('MAIN.LOAD_BBOX'),
-                    'OK',
+                    this.translate.instant('SHARED.OK'),
                     { duration: 4000 }
                 )
                 snackBarRef
@@ -1057,9 +1057,9 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         const featureCount = this.dataService.getGeojson().features.length
         if (featureCount > 0) {
             this.alertService.showAlert(
-                `${featureCount} ${this.translate.instant(
-                    'MAIN.START_SNACK_ITEMS_IN_MEMORY'
-                )}`
+                this.translate.instant('MAIN.START_SNACK_ITEMS_IN_MEMORY', {
+                    count: featureCount,
+                })
             )
         } else {
             this.alertService.requestRefreshTooltip()

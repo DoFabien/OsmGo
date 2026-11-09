@@ -10,7 +10,7 @@ Thank you for helping improve Osm Go!. Useful project links:
 
 ## Translations
 
-Osm Go! translations are managed on [POEditor](https://poeditor.com/join/project/f2ASHUwwGp). You can add missing translations, improve existing ones, and leave context for other translators.
+The interface is written in English (`src/assets/i18n/en.json`) and translated with an AI model. Every English text has a note for the translator in `i18n/en.context.json`: add or update it with the text. French is maintained with the code. [i18n/README.md](i18n/README.md) describes how to translate a language and the instructions given to the model; `npm run i18n -- check` validates the catalogs.
 
 Some preset translations come from [iD Tagging Schema](https://github.com/openstreetmap/id-tagging-schema). Object descriptions come from the OpenStreetMap wiki through [Taginfo](https://taginfo.openstreetmap.org). Improve those descriptions on the related wiki item when the source text is incorrect.
 

@@ -6,17 +6,13 @@
         "CONFIRM": "確認",
         "ADD": "新增",
         "OK": "OK",
-        "UNKNOWN": "未知",
-        "UNDEFINED": "未定義",
-        "NAME": "名稱",
-        "ID": "編號",
         "CLOSE": "關閉",
         "LOADING": "載入中..."
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "你確定嗎？",
         "EXIT_CONFIRM_MESSAGE": "離開 Osm Go!？",
-        "START_SNACK_ITEMS_IN_MEMORY": "記憶體中的物件",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} 記憶體中的物件",
         "WHAT_ITEM": "那一個？",
         "LOAD_BBOX": "載入資料？"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "你確定嗎？",
         "DELETE_DATA_CONFIRM_MESSAGE": "刪除下載的資料？(保留變動)",
         "SIGN_OUT": "登出",
-        "EXIT": "離開",
         "NEW_VERSION": "已經有新版本了！",
         "TAG_MANAGEMENT": "標籤管理"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© 開放街圖貢獻者"
     },
     "LOGIN": {
-        "LOGIN": "登入",
         "LOGIN_BUTTON": "登入"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "已經刪除了",
         "TOTAL_ITEMS": "總共",
         "CHANGESET_COMMENT": "變動集評論",
-        "TYPE": "種類",
-        "NAME": "名稱",
         "ERROR": "錯誤",
-        "SEND": "上傳！",
         "DELETE": "刪除",
         "DELETE_CONFIRM_HEADER": "你確定嗎？",
-        "DELETE_CONFIRM_MESSAGE": "刪除所有變動？",
         "CANCEL_THIS_CHANGE": "取消這次變動",
         "UPLOADING_DATA_TO_OSM": "上傳變動到開放街圖...",
         "DONT_CLOSE": "請先不要關閉這一頁"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "你確定嗎？",
         "DELETE_CONFIRM_MESSAGE": "刪除這個項目？",
         "SELECT_CATEGORY": "選取類別",
-        "THIS_NODE_IS_USED_BY_A_WAY": "這個節點被 {x} 路徑使用",
+        "THIS_NODE_IS_USED_BY_A_WAY": "這個節點被 {{count}} 路徑使用",
         "UNDEFINED_VALUE": "未知",
         "LAST_TAG_USED": "上次使用標籤",
         "BOOKMARKS": "書籤"

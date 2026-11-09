@@ -6,17 +6,13 @@
         "CONFIRM": "Potvrdit",
         "ADD": "Přidat",
         "OK": "Ok",
-        "UNKNOWN": "Neznámý",
-        "UNDEFINED": "Nedefinovaný",
-        "NAME": "Název",
-        "ID": "ID",
         "CLOSE": "Zavřít",
         "LOADING": "Načítání..."
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Opravdu?",
         "EXIT_CONFIRM_MESSAGE": "Opravdu chcete opustit Osm Go! ?",
-        "START_SNACK_ITEMS_IN_MEMORY": "položek v paměti",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} položek v paměti",
         "WHAT_ITEM": "Který?",
         "LOAD_BBOX": "Načíst data?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Opravdu?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Smazat stažená data? (zachová změny)",
         "SIGN_OUT": "Odhlásit",
-        "EXIT": "Zavřít",
         "NEW_VERSION": "K dispozici nová verze!",
         "TAG_MANAGEMENT": "Správa tagů"
     },
@@ -37,7 +32,6 @@
         "DATA": "Data"
     },
     "LOGIN": {
-        "LOGIN": "Login",
         "LOGIN_BUTTON": "Přihlásit"
     },
     "SEND_DATA": {
@@ -47,13 +41,9 @@
         "UPDATED_ITEMS": "Změněné",
         "DELETED_ITEMS": "Smazané",
         "CHANGESET_COMMENT": "Komentář sady změn",
-        "TYPE": "Typ",
-        "NAME": "Název",
         "ERROR": "Chyba",
-        "SEND": "Odeslat!",
         "DELETE": "Smazat",
-        "DELETE_CONFIRM_HEADER": "Opravdu?",
-        "DELETE_CONFIRM_MESSAGE": "Vrátit všechny změny?"
+        "DELETE_CONFIRM_HEADER": "Opravdu?"
     },
     "SETTINGS": {
         "SETTINGS": "Nastavení",
@@ -86,7 +76,7 @@
         "ADD_A_TAG": "Přidat tag",
         "DELETE_CONFIRM_HEADER": "Opravdu?",
         "DELETE_CONFIRM_MESSAGE": "Smazat objekt?",
-        "THIS_NODE_IS_USED_BY_A_WAY": "Uzel je {x}x součástí cesty",
+        "THIS_NODE_IS_USED_BY_A_WAY": "Uzel je {{count}}x součástí cesty",
         "LAST_TAG_USED": "Nedávné",
         "BOOKMARKS": "Oblíbené"
     },

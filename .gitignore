@@ -59,3 +59,6 @@ android/app/capacitor.build.gradle
 
 # Local notes, reviews and signing material
 wFabien/
+
+# Translation batches written by `npm run i18n -- todo`
+/i18n/todo/

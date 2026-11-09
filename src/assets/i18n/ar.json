@@ -6,17 +6,13 @@
         "CONFIRM": "تأكيد",
         "ADD": "إضافة",
         "OK": "موافق",
-        "UNKNOWN": "غير معروف",
-        "UNDEFINED": "غير محدد",
-        "NAME": "الاسم",
-        "ID": "المعرف",
         "CLOSE": "إغلاق",
         "LOADING": "جار التحميل…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "هل أنت متأكد؟",
         "EXIT_CONFIRM_MESSAGE": "الخروج من تطبيق Osm Go !؟",
-        "START_SNACK_ITEMS_IN_MEMORY": "العناصر الموجودة في الذاكرة",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} العناصر الموجودة في الذاكرة",
         "WHAT_ITEM": "أيّ؟",
         "LOAD_BBOX": "تحميل البيانات؟"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "هل أنت متأكد؟",
         "DELETE_DATA_CONFIRM_MESSAGE": "هل تريد حذف البيانات التي تم تنزيلها؟ (يتم الاحتفاظ بالتغييرات التي أجريتها)",
         "SIGN_OUT": "تسجيل الخروج",
-        "EXIT": "خروج",
         "NEW_VERSION": "توجد نسخة جديدة متاحة!",
         "TAG_MANAGEMENT": "إدارة الوسوم"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© المساهمون في خريطة الشارع المفتوحة"
     },
     "LOGIN": {
-        "LOGIN": "تسجيل الدخول",
         "LOGIN_BUTTON": "تسجيل الدخول"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "محذوفة",
         "TOTAL_ITEMS": "الإجمالي",
         "CHANGESET_COMMENT": "التعليق على التغييرات",
-        "TYPE": "النوع",
-        "NAME": "الاسم",
         "ERROR": "خطأ",
-        "SEND": "الرفع !",
         "DELETE": "حذف",
         "DELETE_CONFIRM_HEADER": "هل أنت متأكد؟",
-        "DELETE_CONFIRM_MESSAGE": "هل تريد حذف كافة التغييرات؟",
         "CANCEL_THIS_CHANGE": "قم بإلغاء هذا التغيير",
         "UPLOADING_DATA_TO_OSM": "جارٍ رفع التغييرات إلى OpenStreetMap ...",
         "DONT_CLOSE": "من فضلك لا تغلق هذه الصفحة"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "هل أنت متأكد؟",
         "DELETE_CONFIRM_MESSAGE": "هل تريد حذف هذا العنصر؟",
         "SELECT_CATEGORY": "اختر تصنيف",
-        "THIS_NODE_IS_USED_BY_A_WAY": "تُستخدم هذه العقدة بواسطة {x} طريق/طرق",
+        "THIS_NODE_IS_USED_BY_A_WAY": "تُستخدم هذه العقدة بواسطة {{count}} طريق/طرق",
         "UNDEFINED_VALUE": "غير معروف",
         "LAST_TAG_USED": "آخر الوسوم المستخدمة",
         "BOOKMARKS": "العلامات المرجعية"

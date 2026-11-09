@@ -6,17 +6,13 @@
         "CONFIRM": "Confirmar",
         "ADD": "Adicionar",
         "OK": "OK",
-        "UNKNOWN": "Desconhecido",
-        "UNDEFINED": "Não definido",
-        "NAME": "Nome",
-        "ID": "ID",
         "CLOSE": "Fechar",
         "LOADING": "A carregar…"
     },
     "MAIN": {
         "EXIT_CONFIRM_HEADER": "Tem a certeza?",
         "EXIT_CONFIRM_MESSAGE": "Sair do OsmGo!?",
-        "START_SNACK_ITEMS_IN_MEMORY": "itens na memória",
+        "START_SNACK_ITEMS_IN_MEMORY": "{{count}} itens na memória",
         "WHAT_ITEM": "Qual?",
         "LOAD_BBOX": "Carregar dados?"
     },
@@ -28,7 +24,6 @@
         "DELETE_DATA_CONFIRM_HEADER": "Tem a certeza?",
         "DELETE_DATA_CONFIRM_MESSAGE": "Eliminar os dados descarregados? (as alterações são mantidas)",
         "SIGN_OUT": "Sair",
-        "EXIT": "Sair",
         "NEW_VERSION": "Nova versão disponível!",
         "TAG_MANAGEMENT": "Gestão de etiquetas"
     },
@@ -39,7 +34,6 @@
         "OSM_CONTRIBUTORS": "© contribuidores do OpenStreetMap"
     },
     "LOGIN": {
-        "LOGIN": "Entrar",
         "LOGIN_BUTTON": "Entrar"
     },
     "SEND_DATA": {
@@ -50,13 +44,9 @@
         "DELETED_ITEMS": "Eliminado",
         "TOTAL_ITEMS": "Total",
         "CHANGESET_COMMENT": "Comentário do conjunto de alterações",
-        "TYPE": "Tipo",
-        "NAME": "Nome",
         "ERROR": "Erro",
-        "SEND": "Enviar!",
         "DELETE": "Eliminar",
         "DELETE_CONFIRM_HEADER": "Tem a certeza?",
-        "DELETE_CONFIRM_MESSAGE": "Eliminar todas as alterações?",
         "CANCEL_THIS_CHANGE": "Cancelar esta alteração",
         "UPLOADING_DATA_TO_OSM": "A enviar as alterações para o OpenStreetMap...",
         "DONT_CLOSE": "Por favor não feche esta página"
@@ -115,7 +105,7 @@
         "DELETE_CONFIRM_HEADER": "Tem a certeza?",
         "DELETE_CONFIRM_MESSAGE": "Eliminar este item?",
         "SELECT_CATEGORY": "Seleciona uma categoria",
-        "THIS_NODE_IS_USED_BY_A_WAY": "O nó é utilizado por {x} via(s).",
+        "THIS_NODE_IS_USED_BY_A_WAY": "O nó é utilizado por {{count}} via(s).",
         "UNDEFINED_VALUE": "Desconhecido",
         "LAST_TAG_USED": "Últimas etiquetas usadas",
         "BOOKMARKS": "Favoritos"
