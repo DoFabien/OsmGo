@@ -7,6 +7,10 @@ import {
     type ApplicationConfig,
     provideCheckNoChangesConfig,
 } from '@angular/core'
+import {
+    MAT_DIALOG_DEFAULT_OPTIONS,
+    MatDialogConfig,
+} from '@angular/material/dialog'
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async'
 import { provideRouter, withRouterConfig } from '@angular/router'
 import { provideServiceWorker } from '@angular/service-worker'
@@ -32,6 +36,12 @@ export const appConfig: ApplicationConfig = {
               ]),
         provideHttpClient(withXhr(), withInterceptorsFromDi()),
         provideAnimationsAsync(),
+        // The map page closes its dialogs itself on the back gesture, which
+        // also moves through the history (see MainPage.handlePopState).
+        {
+            provide: MAT_DIALOG_DEFAULT_OPTIONS,
+            useValue: { ...new MatDialogConfig(), closeOnNavigation: false },
+        },
         provideServiceWorker('ngsw-worker.js', {
             enabled: environment.production && !Capacitor.isNativePlatform(),
         }),

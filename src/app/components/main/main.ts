@@ -62,6 +62,7 @@ import {
     filter,
     finalize,
     map,
+    startWith,
     switchMap,
     throttleTime,
 } from 'rxjs/operators'
@@ -172,12 +173,91 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     private lateLinkedObject?: { lon: number; lat: number }
     private linkedObjectDownload?: Subscription
     private activeOverlayContent?: RouteOverlayContent
+    private readonly dialogOpen = signal(false)
+    /** Whether something on the map page closes with the back gesture. */
+    private readonly backClosableOpen = computed(
+        () =>
+            this.menuIsOpen() ||
+            this.selectedFeature() !== null ||
+            this.mapService.markerMoving() ||
+            this.mapService.markerMoveMoving() ||
+            this.dialogOpen()
+    )
+    private backEntryPushed = false
+    private returningToBackEntry = false
     private readonly handlePopState = (): void => {
-        if (this.overlayOpen()) return
+        if (this.returningToBackEntry) {
+            this.returningToBackEntry = false
+            return
+        }
+        if (this.overlayOpen()) {
+            this.dialog.closeAll()
+            return
+        }
+        this.backEntryPushed = false
         this.closeInternalState()
+        // What is still open (the sheet under a dialog, an exit
+        // confirmation) needs the entry back for the next back gesture.
+        setTimeout(() => {
+            if (this.backClosableOpen()) this.returnToBackEntry()
+            // The entry below may still name the closed object.
+            if (
+                !this.selectedFeature() &&
+                this.route.snapshot.queryParamMap.has('id')
+            ) {
+                void this.router.navigate([], {
+                    replaceUrl: true,
+                    relativeTo: this.route,
+                    queryParams: { id: null },
+                    queryParamsHandling: 'merge',
+                })
+            }
+        })
+    }
+
+    /**
+     * In a browser the map page is a single history entry, so the back
+     * gesture would leave the application. An extra entry is pushed while a
+     * sheet, the menu or a dialog is open, and the back gesture closes it.
+     * The native application handles its back button instead.
+     */
+    private pushBackEntry(): void {
+        if (
+            this.backEntryPushed ||
+            Capacitor.isNativePlatform() ||
+            this.overlayOpen()
+        ) {
+            return
+        }
+        history.pushState(history.state, '', location.href)
+        this.backEntryPushed = true
+    }
+
+    /**
+     * Moves forward again to the entry that the back gesture left. Pushing a
+     * new one would not work: the browser's back button skips the entries
+     * pushed without a user interaction.
+     */
+    private returnToBackEntry(): void {
+        if (Capacitor.isNativePlatform() || this.overlayOpen()) return
+        this.returningToBackEntry = true
+        this.backEntryPushed = true
+        history.forward()
+        // Without an entry ahead, no popstate event follows.
+        setTimeout(() => {
+            this.returningToBackEntry = false
+        }, 1000)
     }
 
     private closeInternalState(): boolean {
+        // An open select or menu panel closes before what is under it.
+        const panelBackdrop = document.querySelector<HTMLElement>(
+            '.cdk-overlay-transparent-backdrop'
+        )
+        if (panelBackdrop) {
+            panelBackdrop.click()
+            return true
+        }
         const openDialogs = this.dialog.openDialogs
         if (openDialogs.length > 0) {
             const dialog = openDialogs[openDialogs.length - 1]
@@ -219,6 +299,15 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
 
     constructor() {
         this.overlayNavigation.installCloseGuard()
+        this.dialog.afterOpened
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => this.dialogOpen.set(true))
+        this.dialog.afterAllClosed
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => this.dialogOpen.set(false))
+        effect(() => {
+            if (this.backClosableOpen()) untracked(() => this.pushBackEntry())
+        })
         effect(() => {
             if (this.dataService.externalStateChange()) {
                 this.presentReloadPrompt('MAIN.SW.EXTERNAL_STATE', 0)
@@ -401,9 +490,12 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 .subscribe(() => {
                     this.presentReloadPrompt('MAIN.SW.UNRECOVERABLE', 0)
                 })
+            // A service worker that is still running when the app opens
+            // does not look for a new version by itself.
             fromEvent(document, 'visibilitychange')
                 .pipe(
                     filter(() => document.visibilityState === 'visible'),
+                    startWith(null),
                     throttleTime(UPDATE_CHECK_INTERVAL_MS),
                     takeUntilDestroyed(this.destroyRef)
                 )
@@ -422,7 +514,11 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         const snackBarRef = this.snackBar.open(
             this.translate.instant(messageKey),
             this.translate.instant('MAIN.SW.RELOAD'),
-            { duration, verticalPosition: 'top' }
+            {
+                duration,
+                verticalPosition: 'top',
+                panelClass: 'osmgo-snackbar-top',
+            }
         )
         snackBarRef
             .onAction()
@@ -800,6 +896,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
         this.snackBar.open(message, this.translate.instant('SHARED.CLOSE'), {
             duration: 4000,
             verticalPosition: 'top',
+            panelClass: 'osmgo-snackbar-top',
         })
     }
 

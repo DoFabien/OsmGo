@@ -50,10 +50,25 @@ header h2 {
     padding: 10px 12px 20px;
 }
 .option-list mat-radio-button {
-    padding: 10px 12px;
     border: 1px solid var(--osmgo-divider);
     border-radius: 15px;
     background: var(--osmgo-surface);
+}
+/* The whole card selects the option, not only the radio and its text. */
+.option-list mat-radio-button ::ng-deep .mdc-form-field {
+    display: flex;
+    width: 100%;
+    padding-left: 4px;
+    box-sizing: border-box;
+}
+.option-list mat-radio-button ::ng-deep .mdc-form-field > label {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 10px 0;
+    cursor: pointer;
 }
 .option-copy {
     display: grid;

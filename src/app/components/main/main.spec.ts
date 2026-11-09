@@ -2,7 +2,7 @@ import { signal } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import { MatDialog } from '@angular/material/dialog'
 import { MatSnackBar } from '@angular/material/snack-bar'
-import { ActivatedRoute, Router } from '@angular/router'
+import { ActivatedRoute, convertToParamMap, Router } from '@angular/router'
 import { SwUpdate } from '@angular/service-worker'
 import { Capacitor } from '@capacitor/core'
 import { TranslateService } from '@ngx-translate/core'
@@ -82,7 +82,16 @@ const createPage = ({
     TestBed.resetTestingModule()
     TestBed.configureTestingModule({
         providers: [
-            { provide: MatDialog, useValue: { openDialogs: [], ...modalCtrl } },
+            {
+                provide: MatDialog,
+                useValue: {
+                    openDialogs: [],
+                    afterOpened: new Subject(),
+                    afterAllClosed: new Subject(),
+                    closeAll: vi.fn(),
+                    ...modalCtrl,
+                },
+            },
             { provide: MatSnackBar, useValue: snackBar },
             { provide: OsmApiService, useValue: osmApi },
             { provide: TagsService, useValue: { jsonSprites: () => ({}) } },
@@ -99,7 +108,13 @@ const createPage = ({
             { provide: SwUpdate, useValue: swUpdate },
             { provide: InitService, useValue: initService },
             { provide: OsmAuthService, useValue: osmAuthService },
-            { provide: ActivatedRoute, useValue: activatedRoute },
+            {
+                provide: ActivatedRoute,
+                useValue: {
+                    snapshot: { queryParamMap: convertToParamMap({}) },
+                    ...activatedRoute,
+                },
+            },
         ],
     })
     const page = TestBed.runInInjectionContext(() => new MainPage())
@@ -168,6 +183,7 @@ describe('MainPage', () => {
                     snapshot: { queryParamMap: { get: () => null } },
                 },
                 swUpdate: {
+                    checkForUpdate: vi.fn(() => Promise.resolve(false)),
                     isEnabled: true,
                     unrecoverable: new Subject(),
                     versionUpdates,
@@ -673,6 +689,145 @@ describe('MainPage', () => {
 
             expect(page.menuIsOpen()).toBe(false)
         })
+
+        describe('in a browser', () => {
+            const effectServices = {
+                dataService: { externalStateChange: signal(false) },
+                initService: { lateLinkedObjectCoords: signal(null) },
+            }
+            const popState = (page: MainPage) =>
+                (
+                    page as unknown as { handlePopState: () => void }
+                ).handlePopState()
+
+            afterEach(() => {
+                vi.restoreAllMocks()
+                vi.useRealTimers()
+            })
+
+            it('adds one history entry while something is open, so that back closes it', () => {
+                const pushState = vi
+                    .spyOn(window.history, 'pushState')
+                    .mockImplementation(() => undefined)
+                const { page } = createPage(effectServices)
+
+                page.openMenu()
+                TestBed.tick()
+                page.closeMenu()
+                page.openMenu()
+                TestBed.tick()
+
+                expect(pushState).toHaveBeenCalledOnce()
+            })
+
+            it('does not add a history entry in the native app', () => {
+                vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true)
+                const pushState = vi
+                    .spyOn(window.history, 'pushState')
+                    .mockImplementation(() => undefined)
+                const { page } = createPage(effectServices)
+
+                page.openMenu()
+                TestBed.tick()
+
+                expect(pushState).not.toHaveBeenCalled()
+            })
+
+            it('goes forward to its entry again when back leaves something open', () => {
+                vi.useFakeTimers()
+                vi.spyOn(window.history, 'pushState').mockImplementation(
+                    () => undefined
+                )
+                const forward = vi
+                    .spyOn(window.history, 'forward')
+                    .mockImplementation(() => undefined)
+                const showModal$ = new Subject<any>()
+                const close = vi.fn()
+                const { page } = createPage({
+                    ...effectServices,
+                    mapService: { showModal$ },
+                    modalCtrl: { openDialogs: [{ close }] },
+                })
+                openRead(showModal$)
+                TestBed.tick()
+
+                popState(page)
+                vi.runOnlyPendingTimers()
+
+                expect(close).toHaveBeenCalledOnce()
+                expect(page.selectedFeature()).not.toBeNull()
+                expect(forward).toHaveBeenCalledOnce()
+                // The popstate event of that forward move closes nothing.
+                popState(page)
+                expect(page.selectedFeature()).not.toBeNull()
+            })
+
+            it('removes the closed object from the address when back closed its sheet', () => {
+                vi.useFakeTimers()
+                const showModal$ = new Subject<any>()
+                const { page, router } = createPage({
+                    ...effectServices,
+                    mapService: { showModal$ },
+                    activatedRoute: {
+                        snapshot: {
+                            queryParamMap: {
+                                has: (key: string) => key === 'id',
+                            },
+                        },
+                    },
+                })
+                openRead(showModal$)
+                withSheet(page, {
+                    closeCategory: () => false,
+                    requestExit: () => page.closeSelection(),
+                })
+                router.navigate.mockClear()
+
+                popState(page)
+                // closeSelection's own update can lose to the router's
+                // restoration of the entry below.
+                router.navigate.mockClear()
+                vi.runOnlyPendingTimers()
+
+                expect(router.navigate).toHaveBeenCalledWith([], {
+                    replaceUrl: true,
+                    relativeTo: expect.anything(),
+                    queryParams: { id: null },
+                    queryParamsHandling: 'merge',
+                })
+            })
+
+            it('closes the dialogs of a routed overlay on back', () => {
+                const closeAll = vi.fn()
+                const { page } = createPage({ modalCtrl: { closeAll } })
+                page.onOverlayActivate({})
+
+                popState(page)
+
+                expect(closeAll).toHaveBeenCalledOnce()
+            })
+        })
+
+        it('closes an open select panel before the dialog or sheet under it', () => {
+            const backdrop = document.createElement('div')
+            backdrop.className = 'cdk-overlay-transparent-backdrop'
+            const click = vi.fn()
+            backdrop.addEventListener('click', click)
+            document.body.append(backdrop)
+            const dialog = { close: vi.fn() }
+            const { page } = createPage({
+                modalCtrl: { openDialogs: [dialog] },
+            })
+
+            try {
+                expect(closeInternalState(page)).toBe(true)
+            } finally {
+                backdrop.remove()
+            }
+
+            expect(click).toHaveBeenCalledOnce()
+            expect(dialog.close).not.toHaveBeenCalled()
+        })
     })
 
     it('guards the overlay routes so that browser back honours canCloseOverlay', () => {
@@ -813,7 +968,7 @@ describe('MainPage', () => {
             TestBed.resetTestingModule()
         })
 
-        it('checks for an update when the app returns to the foreground, without spamming', () => {
+        it('checks for an update at startup, then not again on an immediate return to the foreground', () => {
             const { checkForUpdate } = createSwPage()
 
             document.dispatchEvent(new Event('visibilitychange'))

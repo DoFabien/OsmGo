@@ -75,3 +75,8 @@ button.mat-mdc-icon-button.mat-mdc-button-base {
 .maplibregl-ctrl-attrib {
     box-sizing: unset;
 }
+
+// Messages shown at the top open under the map buttons instead of covering them.
+.mat-mdc-snack-bar-container.osmgo-snackbar-top {
+    margin-top: calc(max(14px, env(safe-area-inset-top)) + 64px);
+}
