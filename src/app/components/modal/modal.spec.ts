@@ -797,6 +797,36 @@ describe('ObjectEditorContentComponent', () => {
             })
         })
 
+        it('keeps the building when a building gets a use', () => {
+            const { page } = createCatalogPage({ building: 'yes' })
+            expect(page.tagConfig.id).toBe('building/yes')
+            const dressingRoom = catalogTags.tags.find(
+                (tag) => tag.id === 'amenity/dressing_room'
+            )
+            if (!dressingRoom) throw new Error('Missing dressing room.')
+
+            page.applyPrimaryTagSelection(structuredClone(dressingRoom))
+            page.pushTagsToFeature()
+
+            expect(page.feature.properties.tags).toEqual({
+                amenity: 'dressing_room',
+                building: 'yes',
+            })
+        })
+
+        it('replaces the building type with a new building category', () => {
+            const { page } = createCatalogPage({ building: 'yes' })
+            const house = catalogTags.tags.find(
+                (tag) => tag.id === 'building/house'
+            )
+            if (!house) throw new Error('Missing house.')
+
+            page.applyPrimaryTagSelection(structuredClone(house))
+            page.pushTagsToFeature()
+
+            expect(page.feature.properties.tags).toEqual({ building: 'house' })
+        })
+
         it('keeps a tag of the old category that the new one adds again', () => {
             const { page } = createCatalogPage({
                 amenity: 'pharmacy',

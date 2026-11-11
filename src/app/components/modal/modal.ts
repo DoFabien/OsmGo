@@ -950,7 +950,11 @@ export class ObjectEditorContentComponent {
     }
 
     applyPrimaryTagSelection(newTagConfig: SelectedTagConfig): void {
-        const oldKeyTagsToDelete = Object.keys(this.tagConfig.tags)
+        // a building stays one when it gets a use (a changing room in a
+        // building=yes): a new building category still replaces its value
+        const oldKeyTagsToDelete = Object.keys(this.tagConfig.tags).filter(
+            (key) => key !== 'building'
+        )
         // like iD, the tags the old category added go too (healthcare=pharmacy)
         const oldAddedTags = Object.entries(this.tagConfig.addTags ?? {})
         let copyTags = cloneDeep(this.tags).filter(
