@@ -20,6 +20,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner'
 import { MatSnackBar } from '@angular/material/snack-bar'
 import { MatToolbarModule } from '@angular/material/toolbar'
 import { MatTooltipModule } from '@angular/material/tooltip'
+import { buildingTagsWithoutPlace } from '@app/utils/building-place'
 import { cloneDeep } from '@app/utils/clone'
 import { resolveReplacementTags } from '@app/utils/deprecated-tags'
 import { isNodeUsedByWay } from '@app/utils/osm-feature'
@@ -31,6 +32,7 @@ import {
     normalizeOsmTags,
     osmTagMapsEqual,
 } from '@app/utils/osm-tags'
+import { surveyDateKeysToSet } from '@app/utils/survey-date'
 import { AlertComponent } from '@components/modal/components/alert/alert.component'
 import { EditOtherTag } from '@components/modal/components/edit/OtherTag.component'
 import { EditPresets } from '@components/modal/components/edit/Presets.component'
@@ -81,6 +83,10 @@ export interface ModalDismissData {
     type?: string
     geojson?: OsmGoFeature
     mode?: MapMode
+    /** With `Move`: the tags the object had before the draft in `geojson`. */
+    baselineTags?: Record<string, string>
+    /** With `Move`: the object was already moved in this editing session. */
+    moved?: boolean
     deleted?: boolean
     origineData?: FeatureIdSource
 }
@@ -102,7 +108,6 @@ interface DeprecatedTags {
 
 type EditorMode = Extract<MapMode, 'Create' | 'Update'>
 
-const SURVEY_DATE_KEYS = ['survey:date', 'check_date']
 @Component({
     selector: 'app-object-editor-content',
     templateUrl: './modal.html',
@@ -126,6 +131,10 @@ const SURVEY_DATE_KEYS = ['survey:date', 'check_date']
         TranslateModule,
     ],
     providers: [PendingFieldEntries],
+    host: {
+        '(focusin)': 'onFocusChange($event)',
+        '(focusout)': 'onFocusChange($event, true)',
+    },
 })
 export class ObjectEditorContentComponent {
     readonly isNodeUsedByWay = isNodeUsedByWay
@@ -139,6 +148,21 @@ export class ObjectEditorContentComponent {
     private readonly snackBar = inject(MatSnackBar)
     private readonly destroyRef = inject(DestroyRef)
     private readonly pendingEntries = inject(PendingFieldEntries)
+
+    /**
+     * A text field has the focus, so the keyboard is open on a phone: the
+     * local change warning would take the room left above the keyboard.
+     */
+    readonly typing = signal(false)
+
+    onFocusChange(event: FocusEvent, leaving = false): void {
+        const target = leaving ? event.relatedTarget : event.target
+        this.typing.set(
+            target instanceof HTMLTextAreaElement ||
+                (target instanceof HTMLInputElement &&
+                    !['checkbox', 'radio', 'button'].includes(target.type))
+        )
+    }
 
     private readonly tagsState = signal<Tag[]>([])
     get tags(): Tag[] {
@@ -236,6 +260,13 @@ export class ObjectEditorContentComponent {
     readonly newPositionInput = input(false, {
         alias: 'newPosition',
     })
+    /**
+     * The tags before the draft carried by `data`, when they differ from it.
+     * Without it, the tags of `data` are the state to compare against.
+     */
+    readonly baselineTagsInput = input<
+        Record<string, string | number> | undefined
+    >(undefined, { alias: 'baselineTags' })
     readonly origineDataInput = input<FeatureIdSource>('data', {
         alias: 'origineData',
     })
@@ -367,17 +398,39 @@ export class ObjectEditorContentComponent {
         }
 
         this.tagsState.set(tags)
-        this.originalTags = cloneDeep(tags)
+        const baselineTags = untracked(() => this.baselineTagsInput())
+        this.originalTags = baselineTags
+            ? Object.entries(normalizeOsmTags(baselineTags)).map(
+                  ([key, value]) => ({ key, value })
+              )
+            : cloneDeep(tags)
+    }
+
+    /** The tags left once the place goes, when it is a place on a building. */
+    buildingTagsWithoutPlace(): Record<string, string> | undefined {
+        const { type, tags } = this.feature.properties
+        return buildingTagsWithoutPlace(
+            type,
+            tags,
+            this.tagsService.findPkey(this.feature)?.key
+        )
     }
 
     presentConfirm(): void {
+        // a building is not deleted with the bank it held: only the bank goes
+        const buildingTags = this.buildingTagsWithoutPlace()
         const data: ConfirmDialogData = {
             title: this.translate.instant(
                 'MODAL_SELECTED_ITEM.DELETE_CONFIRM_HEADER'
             ),
-            message: this.translate.instant(
-                'MODAL_SELECTED_ITEM.DELETE_CONFIRM_MESSAGE'
-            ),
+            message: buildingTags
+                ? this.translate.instant(
+                      'MODAL_SELECTED_ITEM.DELETE_KEEP_BUILDING_MESSAGE',
+                      { category: this.fieldMemoryCategory }
+                  )
+                : this.translate.instant(
+                      'MODAL_SELECTED_ITEM.DELETE_CONFIRM_MESSAGE'
+                  ),
             cancelLabel: this.translate.instant('SHARED.CANCEL'),
             confirmLabel: this.translate.instant('SHARED.CONFIRM'),
             destructive: true,
@@ -390,7 +443,10 @@ export class ObjectEditorContentComponent {
             })
             .afterClosed()
             .subscribe((confirmed) => {
-                if (confirmed) {
+                if (!confirmed) return
+                if (buildingTags) {
+                    this.removePlaceFromBuilding(buildingTags)
+                } else {
                     this.deleteOsmElement()
                 }
             })
@@ -777,7 +833,21 @@ export class ObjectEditorContentComponent {
             return
         }
         if (!this.tagsAreSavable()) return
+        this.saveTags()
+    }
 
+    private removePlaceFromBuilding(tags: Record<string, string>): void {
+        this.tagsState.set(
+            Object.entries(tags).map(([key, value]) => ({ key, value }))
+        )
+        this.feature.properties.primaryTag = {
+            key: 'building',
+            value: tags['building'],
+        }
+        this.saveTags()
+    }
+
+    private saveTags(): void {
         this.mapService.setIsProcessing(true)
         this.typeFicheState.set('Loading')
 
@@ -859,8 +929,20 @@ export class ObjectEditorContentComponent {
     }
 
     moveOsmElement(): void {
+        this.pendingEntries.commitAll()
+        // The editor is rebuilt once the move ends: it must come back with the
+        // draft still counted as unsaved, not as the state of the object.
+        const baselineTags = Object.fromEntries(
+            normalizedOsmTagMap(this.originalTags)
+        )
         this.pushTagsToFeature()
-        this.dismiss({ type: 'Move', geojson: this.feature, mode: this.mode })
+        this.dismiss({
+            type: 'Move',
+            geojson: this.feature,
+            mode: this.mode,
+            baselineTags,
+            moved: this.newPosition,
+        })
     }
 
     openPrimaryTagModal(): void {
@@ -1105,17 +1187,22 @@ export class ObjectEditorContentComponent {
         return YYYY + '-' + MM + '-' + DD
     }
 
-    /** Sets the chosen date key, and refreshes the other one if present. */
+    /** Dates the object, keeping a single date key (see `surveyDateKeysToSet`). */
     addSurveyDate(): void {
         const isoDate = this.generateISODate(new Date())
-        const checkedKey = this.configService.config().checkedKey
-        const tags = this.tags.map((tag) =>
-            SURVEY_DATE_KEYS.includes(tag.key)
-                ? { ...tag, value: isoDate }
-                : tag
+        const keys = surveyDateKeysToSet(
+            this.tags
+                .filter((tag) => String(tag.value ?? '').trim() !== '')
+                .map((tag) => tag.key),
+            this.configService.config().checkedKey
         )
-        if (!tags.some((tag) => tag.key === checkedKey)) {
-            tags.push({ key: checkedKey, value: isoDate })
+        const tags = this.tags.map((tag) =>
+            keys.includes(tag.key) ? { ...tag, value: isoDate } : tag
+        )
+        for (const key of keys) {
+            if (!tags.some((tag) => tag.key === key)) {
+                tags.push({ key, value: isoDate })
+            }
         }
         this.tagsState.set(tags)
     }
@@ -1175,6 +1262,18 @@ export class ObjectEditorContentComponent {
             .map((tag) => ({ key: tag.key, value: tag.value }))
     }
 
+    /** The fix of a deprecated tag must leave a tag the editor supports. */
+    canFixDeprecated(): boolean {
+        const replace = (
+            this.tagConfig as { replace?: Record<string, unknown> } | undefined
+        )?.replace
+        const primaryKeys = this.tagsService.primaryKeys()
+        return (
+            primaryKeys.length === 0 ||
+            Object.keys(replace ?? {}).some((key) => primaryKeys.includes(key))
+        )
+    }
+
     fixDeprecated(deprecated: DeprecatedTags): void {
         const deprecatedKeys = Object.keys(deprecated.old)
         const featureTags = { ...this.feature.properties.tags }
@@ -1193,8 +1292,12 @@ export class ObjectEditorContentComponent {
             key,
             value,
         }))
+        // a key the replacement sets must not stay with its former value,
+        // which would win when the tags are written
         const remainingTags = this.tags.filter(
-            (tag) => !deprecatedKeys.includes(tag.key)
+            (tag) =>
+                !deprecatedKeys.includes(tag.key) &&
+                !Object.hasOwn(replace, tag.key)
         )
         this.tagsState.set([...replacementTags, ...remainingTags])
 

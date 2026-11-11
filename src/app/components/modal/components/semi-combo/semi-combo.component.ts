@@ -19,7 +19,8 @@ import { PendingFieldEntries } from '../../pending-field-entries'
 import type { TagSelectionChange } from '../select/select.component'
 
 const SUGGESTION_COUNT = 8
-const EMPTY_FIELD_SUGGESTION_COUNT = 6
+/** Values offered without typing, the chosen ones left out. */
+const IDLE_SUGGESTION_COUNT = 6
 
 /** `pizza; italian` → `['pizza', 'italian']`, every value kept as written. */
 export const splitSemiComboValue = (value: unknown): string[] =>
@@ -75,11 +76,7 @@ export class SemiComboComponent {
         const available = (this.preset().options ?? []).filter(
             (option) => option.v !== '' && !values.includes(option.v)
         )
-        if (query === '') {
-            return values.length === 0
-                ? available.slice(0, EMPTY_FIELD_SUGGESTION_COUNT)
-                : []
-        }
+        if (query === '') return available.slice(0, IDLE_SUGGESTION_COUNT)
         return available
             .filter(
                 (option) =>

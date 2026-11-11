@@ -22,6 +22,12 @@ export class AlertComponent {
     readonly tagConfig = input<AlertTagConfig>()
     readonly language = input('en')
     readonly countryCode = input('')
+    /**
+     * Whether the replacement can be applied by the editor. A replacement
+     * without a primary key (a scrap yard becomes `landuse=industrial`) would
+     * leave an object the editor cannot open.
+     */
+    readonly canFix = input(true)
     readonly fixDeprecated = output<{
         old: Record<string, string | number>
         replace: Record<string, string | number>

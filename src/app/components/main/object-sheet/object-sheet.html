@@ -17,6 +17,7 @@
             type="Create"
             [data]="selection().geojson"
             [newPosition]="selection().newPosition ?? false"
+            [baselineTags]="selection().baselineTags"
             [origineData]="selection().origineData"
             (dismissed)="handleEditorDismissed($event)"
             (categoryRequested)="openCategory()"
@@ -27,6 +28,7 @@
             type="Update"
             [data]="selection().geojson"
             [newPosition]="selection().newPosition ?? false"
+            [baselineTags]="selection().baselineTags"
             [origineData]="selection().origineData"
             (dismissed)="handleEditorDismissed($event)"
             (categoryRequested)="openCategory()"
@@ -196,6 +198,7 @@
             [tagConfig]="selectedTagConfig()"
             [language]="configService.config().languageTags"
             [countryCode]="configService.config().countryTags"
+            [canFix]="canFixDeprecated()"
             (fixDeprecated)="fixDeprecated($event)"
         ></app-alert>
 
@@ -231,6 +234,10 @@
         <survey-card
             [feature]="feature()"
             [disabled]="mapService.isProcessing()"
+            [removable]="
+                feature().properties.type === 'node' ||
+                !!buildingTagsWithoutPlace()
+            "
             (yes)="handleSurveyYes()"
             (no)="handleSurveyNo()"
         ></survey-card>
@@ -308,6 +315,7 @@
             >
             {{ 'SHARED.CLOSE' | translate }}
         </button>
+        @if (!isPendingDeletion()) {
         <button
             mat-flat-button
             type="button"
@@ -321,6 +329,7 @@
             >
             {{ 'SHARED.EDIT' | translate }}
         </button>
+        }
     </footer>
     }
 </section>

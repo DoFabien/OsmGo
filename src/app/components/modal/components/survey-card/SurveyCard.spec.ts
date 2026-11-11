@@ -4,7 +4,7 @@ import type { OsmGoFeature } from '@osmgo/type'
 import { SurveyCard } from './SurveyCard'
 
 describe('SurveyCard', () => {
-    function render(type: 'node' | 'way') {
+    function render(type: 'node' | 'way', removable?: boolean) {
         TestBed.resetTestingModule()
         TestBed.configureTestingModule({
             imports: [SurveyCard, TranslateModule.forRoot()],
@@ -13,6 +13,9 @@ describe('SurveyCard', () => {
         fixture.componentRef.setInput('feature', {
             properties: { type },
         } as OsmGoFeature)
+        if (removable !== undefined) {
+            fixture.componentRef.setInput('removable', removable)
+        }
         fixture.detectChanges()
         return fixture
     }
@@ -37,5 +40,14 @@ describe('SurveyCard', () => {
             fixture.nativeElement.querySelector('.survey-card__hint')
                 .textContent
         ).toContain('MODAL_SELECTED_ITEM.SURVEY_NO_NODE_ONLY')
+    })
+
+    it('lets a bank on a building be reported as gone', () => {
+        const fixture = render('way', true)
+
+        expect(noButton(fixture).disabled).toBe(false)
+        expect(
+            fixture.nativeElement.querySelector('.survey-card__hint')
+        ).toBeNull()
     })
 })

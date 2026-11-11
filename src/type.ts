@@ -122,6 +122,7 @@ export interface Preset {
     options?: PresetOption[]
     type: string
     iDtype?: string
+    minValue?: number
     placeholder?: string
     snake_case?: boolean
     caseSensitive?: boolean
@@ -210,6 +211,12 @@ export interface EventShowModal {
     type: MapMode
     geojson: OsmGoFeature
     newPosition?: boolean
+    /**
+     * The tags the object had before the draft carried by `geojson`, when the
+     * editor is reopened on tags that are already edited (after a move, or on
+     * the replacement of deprecated tags).
+     */
+    baselineTags?: Record<string, string | number>
     origineData: FeatureIdSource
     openPrimaryTagModalOnStart?: boolean
 }

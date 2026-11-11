@@ -30,6 +30,7 @@ import { AppStorage } from '@services/app-storage.service'
 import { type Basemap, hasSupportedTileUrls } from '@services/basemaps.service'
 import { type Config, ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
+import { HeadingAnimator } from '@services/heading-animator'
 import { LocationService } from '@services/location.service'
 import {
     FEATURE_VISIBILITY_LAYER_IDS,
@@ -125,7 +126,8 @@ const HEADING_MIN_DELTA = 3
 const TAP_QUERY_RADIUS = 10
 const FOLLOW_VIEW_SAVE_INTERVAL_MS = 15_000
 const FOLLOW_EVENT_DATA = { osmgoFollow: true }
-const HEADING_RENDER_INTERVAL_MS = 250
+/** The marker of an unlocked map turns at most this often. */
+const ICON_ROTATE_INTERVAL_MS = 100
 const FOCUS_MAX_ZOOM = 19
 /** Below this zoom, a download would cover too large an area. */
 export const MIN_DOWNLOAD_ZOOM = 14
@@ -394,10 +396,17 @@ export class MapService {
 
     map!: MapLibreMap
     markerMove?: OsmGoMarker<OsmGoFeature<Point>>
+    /** Where the moved object was, joined to the move marker by a line. */
+    private moveOrigin?: [number, number]
     private readonly markerMoveMovingState = signal(false)
     readonly markerMoveMoving = this.markerMoveMovingState.asReadonly()
     mode: MapMode = 'Update'
+    private readonly bearingState = signal(0)
+    /** Map rotation in degrees, 0 when north is up. */
+    readonly bearing = this.bearingState.asReadonly()
     headingIsLocked: boolean = true
+    /** North was put up with the compass; only the GPS button locks the heading again. */
+    private northRequested = false
     private lastRenderedHeading: number | null = null
     positionIsFollow: boolean = true
     private readonly isDisplaySatelliteBaseMapState = signal(false)
@@ -722,10 +731,6 @@ export class MapService {
         return bbox
     }
 
-    resetNorth(): void {
-        this.map.resetNorth()
-    }
-
     displaySatelliteBaseMap(baseMap: Basemap, isDisplay: boolean): void {
         if (!this.mapCreated || !this.layersAreLoaded) {
             this.deferredBasemap = { baseMap, isDisplay }
@@ -812,7 +817,11 @@ export class MapService {
         this.map.addControl(this.attributionControl)
         this.basemapAttributionText = attribution
     }
-    centerOnMyPosition(): void {
+    /**
+     * `automatic` is the recentering waiting for the first position: it keeps
+     * north up when the user asked for it meanwhile with the compass.
+     */
+    centerOnMyPosition(automatic = false): void {
         if (!this.mapCreated) return
         if (!this.locationService.location()) {
             this.pendingRecenter = true
@@ -822,13 +831,14 @@ export class MapService {
         this.isFirstPosition = false
         const currentZoom = this.map.getZoom()
         const config = this.configService.config()
-        if (config.lockMapHeading) {
+        if (!automatic) this.northRequested = false
+        if (config.lockMapHeading && !this.northRequested) {
             this.headingIsLocked = true
         }
         let bearing = 0
         if (config.followPosition) {
             this.positionIsFollow = true
-            if (config.lockMapHeading) {
+            if (config.lockMapHeading && this.headingIsLocked) {
                 bearing = this.locationService.compassHeading().trueHeading ?? 0
                 if (this.layersAreLoaded) {
                     this.map.setLayoutProperty(
@@ -912,6 +922,7 @@ export class MapService {
     openModalWithNewPosition(): void {
         if (!this.markerMove) return
         this.markerMoveMovingState.set(false)
+        this.clearMoveLine()
         this.markerMove.remove()
         const geojson = this.markerMove.data
         const newLngLat = this.markerMove.getLngLat()
@@ -931,6 +942,7 @@ export class MapService {
     cancelNewPosition(): void {
         if (!this.markerMove) return
         this.markerMoveMovingState.set(false)
+        this.clearMoveLine()
         const geojson = this.markerMove.data
         const origineData = geojson.properties.changeType
             ? 'data_changed'
@@ -942,6 +954,14 @@ export class MapService {
         })
         this.markerMove.remove()
         this.markerMove = undefined
+    }
+
+    /** Puts north up; the compass no longer turns the map until the next recentering. */
+    resetNorth(): void {
+        if (!this.mapCreated) return
+        this.headingIsLocked = false
+        this.northRequested = true
+        this.map.easeTo({ bearing: 0, duration: 300 })
     }
 
     private stopFollowing(): void {
@@ -973,6 +993,48 @@ export class MapService {
         this.markerMove?.remove()
         this.markerPositionate = undefined
         this.markerMove = undefined
+        this.clearMoveLine()
+    }
+
+    /** Joins the original position of the moved object to `target`. */
+    private drawMoveLine(target: [number, number]): void {
+        if (!this.moveOrigin) return
+        this.setMoveLineData([
+            {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                    type: 'LineString',
+                    coordinates: [this.moveOrigin, target],
+                },
+            },
+            {
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'Point', coordinates: this.moveOrigin },
+            },
+        ])
+    }
+
+    private clearMoveLine(): void {
+        if (!this.moveOrigin) return
+        this.moveOrigin = undefined
+        this.setMoveLineData([])
+    }
+
+    private setMoveLineData(features: Feature[]): void {
+        if (!this.mapCreated) return
+        let source: GeoJSONSource | undefined
+        try {
+            source = this.map.getSource('move_line') as
+                | GeoJSONSource
+                | undefined
+        } catch {
+            // No style while a lost WebGL context is being restored: the line
+            // is drawn again on the next move once the style is back.
+            return
+        }
+        source?.setData({ type: 'FeatureCollection', features })
     }
 
     createDomMoveMarker<T>(coord: LngLatLike, data: T): OsmGoMarker<T> {
@@ -1167,6 +1229,7 @@ export class MapService {
                         this.styleReady = false
                         this.layersAreLoaded = false
                         this.configService.setCurrentZoom(activeMap.getZoom())
+                        this.bearingState.set(activeMap.getBearing())
 
                         activeMap.addControl(new NavigationControl())
                         this.attributionControl = new AttributionControl({
@@ -1215,6 +1278,7 @@ export class MapService {
                             }
                             if (this.markerMoveMoving()) {
                                 this.markerMove?.setLngLat(center)
+                                this.drawMoveLine(center.toArray())
                             }
                         }
                         const onMoveEnd = (event: MapLibreEvent): void => {
@@ -1314,7 +1378,7 @@ export class MapService {
                                 const pointFeature =
                                     data.geojson as OsmGoFeature<Point>
                                 const coordinates = pointFeature.geometry
-                                    .coordinates as LngLatLike
+                                    .coordinates as [number, number]
                                 activeMap.setCenter(coordinates)
                                 this.markerMove = this.createDomMoveMarker(
                                     coordinates,
@@ -1322,6 +1386,8 @@ export class MapService {
                                 )
                                 this.markerMoveMovingState.set(true)
                                 this.markerMove.addTo(activeMap)
+                                this.moveOrigin = [...coordinates]
+                                this.drawMoveLine(coordinates)
                             })
                         )
 
@@ -1334,7 +1400,11 @@ export class MapService {
                                 initialFeatures
                                     .map((feature) => feature.properties.marker)
                                     .filter(
+                                        // `hasImage('')` fires a map error,
+                                        // fatal before the style is loaded
                                         (marker) =>
+                                            typeof marker === 'string' &&
+                                            marker.length > 0 &&
                                             !configuredMap.hasImage(marker)
                                     )
                             ),
@@ -1685,6 +1755,7 @@ export class MapService {
         addSource('ways')
         addSource('ways_changed')
         addSource('location_circle')
+        addSource('move_line')
 
         addLayer({
             id: 'bboxLayer',
@@ -1793,6 +1864,40 @@ export class MapService {
                     false,
                 ],
             ],
+        })
+
+        // During a move, a dashed line joins the original position to the move
+        // marker, under the object markers.
+        addLayer({
+            id: 'move_line_casing',
+            type: 'line',
+            source: 'move_line',
+            paint: { 'line-color': '#ffffff', 'line-width': 6 },
+            layout: { 'line-cap': 'round' },
+            filter: ['==', ['geometry-type'], 'LineString'],
+        })
+        addLayer({
+            id: 'move_line',
+            type: 'line',
+            source: 'move_line',
+            paint: {
+                'line-color': '#1767c4',
+                'line-width': 3,
+                'line-dasharray': [2, 1.5],
+            },
+            filter: ['==', ['geometry-type'], 'LineString'],
+        })
+        addLayer({
+            id: 'move_origin',
+            type: 'circle',
+            source: 'move_line',
+            paint: {
+                'circle-radius': 5,
+                'circle-color': '#1767c4',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#ffffff',
+            },
+            filter: ['==', ['geometry-type'], 'Point'],
         })
 
         // The bundled glyphs only cover the Latin, Greek and Cyrillic scripts:
@@ -1989,6 +2094,9 @@ export class MapService {
         }
 
         const onRotate = (): void => {
+            if (this.map === activeMap) {
+                this.bearingState.set(activeMap.getBearing())
+            }
             if (!layersReady()) return
             const trueHeading =
                 this.locationService.compassHeading().trueHeading
@@ -2045,28 +2153,51 @@ export class MapService {
             view?.removeEventListener('online', onOnline)
         )
 
+        // The map follows the compass frame by frame; the position marker of
+        // an unlocked map only turns by visible steps, as each change
+        // re-lays out the symbols.
+        const headingAnimator = new HeadingAnimator(
+            () => activeMap.getBearing(),
+            (bearing) => activeMap.jumpTo({ bearing }, FOLLOW_EVENT_DATA),
+            {
+                request: (callback) =>
+                    view?.requestAnimationFrame(callback) ?? 0,
+                cancel: (handle) => view?.cancelAnimationFrame(handle),
+            },
+            // `jumpTo` interrupts a running camera animation: a frame left
+            // pending must not cancel "reset north" or the fly to the position.
+            () =>
+                this.map === activeMap &&
+                !this.configService.freezeMapRenderer &&
+                this.configService.config().lockMapHeading &&
+                this.headingIsLocked &&
+                !activeMap.isMoving()
+        )
+        this.lifecycle.trackCleanup(() => headingAnimator.stop())
+        let lastIconRotate: number | null = null
+        let lastIconRotateTime = 0
+        const setIconRotate = (rotate: number): void => {
+            lastIconRotate = rotate
+            lastIconRotateTime = Date.now()
+            activeMap.setLayoutProperty('location_user', 'icon-rotate', rotate)
+        }
         this.lifecycle.trackSession(
             this.locationService.compassHeadingChanges$
                 .pipe(
-                    filter((heading): heading is HeadingWithTrueHeading => {
-                        if (heading.trueHeading === null) return false
-                        return (
-                            this.lastRenderedHeading === null ||
-                            headingDelta(
-                                heading.trueHeading,
-                                this.lastRenderedHeading
-                            ) >= HEADING_MIN_DELTA
-                        )
-                    }),
-                    throttleTime(HEADING_RENDER_INTERVAL_MS)
+                    filter(
+                        (heading): heading is HeadingWithTrueHeading =>
+                            heading.trueHeading !== null
+                    )
                 )
                 .subscribe((heading) => {
                     if (!layersReady()) return
-                    if (this.configService.freezeMapRenderer) return
+                    if (this.configService.freezeMapRenderer) {
+                        headingAnimator.stop()
+                        return
+                    }
                     const lockedOnHeading =
                         this.configService.config().lockMapHeading &&
                         this.headingIsLocked
-                    if (lockedOnHeading && activeMap.isMoving()) return
                     if (this.lastRenderedHeading === null) {
                         activeMap.setLayoutProperty(
                             'location_user',
@@ -2077,26 +2208,29 @@ export class MapService {
                     this.lastRenderedHeading = heading.trueHeading
 
                     if (lockedOnHeading) {
-                        activeMap.jumpTo(
-                            { bearing: heading.trueHeading },
-                            FOLLOW_EVENT_DATA
-                        )
-                        activeMap.setLayoutProperty(
-                            'location_user',
-                            'icon-rotate',
-                            0
-                        )
-                    } else {
-                        const iconRotate = this.getIconRotate(
-                            heading.trueHeading,
-                            activeMap.getBearing()
-                        )
-
-                        activeMap.setLayoutProperty(
-                            'location_user',
-                            'icon-rotate',
-                            iconRotate
-                        )
+                        // A gesture or the center button animation has the
+                        // camera: the compass waits for it to end.
+                        if (activeMap.isMoving()) {
+                            headingAnimator.stop()
+                            return
+                        }
+                        headingAnimator.push(heading.trueHeading)
+                        if (lastIconRotate !== 0) setIconRotate(0)
+                        return
+                    }
+                    headingAnimator.stop()
+                    const iconRotate = this.getIconRotate(
+                        heading.trueHeading,
+                        activeMap.getBearing()
+                    )
+                    if (
+                        lastIconRotate === null ||
+                        (headingDelta(iconRotate, lastIconRotate) >=
+                            HEADING_MIN_DELTA &&
+                            Date.now() - lastIconRotateTime >=
+                                ICON_ROTATE_INTERVAL_MS)
+                    ) {
+                        setIconRotate(iconRotate)
                     }
                 })
         )
@@ -2129,7 +2263,7 @@ export class MapService {
                             ) {
                                 this.pendingRecenter = false
                             } else {
-                                this.centerOnMyPosition()
+                                this.centerOnMyPosition(true)
                             }
                             return
                         }
@@ -2152,13 +2286,7 @@ export class MapService {
             this.isFirstPosition = false
             camera.zoom = Math.max(activeMap.getZoom(), GPS_START_ZOOM)
         }
-        if (
-            config.lockMapHeading &&
-            this.headingIsLocked &&
-            this.lastRenderedHeading !== null
-        ) {
-            camera.bearing = this.lastRenderedHeading
-        }
+        // The bearing is left to the compass animation: jumpTo keeps it.
         activeMap.jumpTo(camera, FOLLOW_EVENT_DATA)
     }
 

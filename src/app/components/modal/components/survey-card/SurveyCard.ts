@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core'
+import { Component, computed, input, output } from '@angular/core'
 import { MatButtonModule } from '@angular/material/button'
 import { MatIconModule } from '@angular/material/icon'
 import { TranslateModule } from '@ngx-translate/core'
@@ -16,6 +16,11 @@ export class SurveyCard {
 
     readonly feature = input.required<OsmGoFeature>()
     readonly disabled = input(false)
+    /** Whether "No" can remove the object; a point can by default. */
+    readonly removable = input<boolean>()
+    readonly canSayNo = computed(
+        () => this.removable() ?? this.feature().properties.type === 'node'
+    )
 
     handleYes(): void {
         this.yes.emit()

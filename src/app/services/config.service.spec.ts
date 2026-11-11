@@ -5,7 +5,11 @@ import { AppStorage } from '@services/app-storage.service'
 import { DataService } from '@services/data.service'
 import { firstValueFrom } from 'rxjs'
 
-import { ConfigService, defaultCountryFromLocale } from './config.service'
+import {
+    ConfigService,
+    defaultCountryFromLocale,
+    resolveUiLanguage,
+} from './config.service'
 
 describe('ConfigService', () => {
     it('merges stored configuration with current defaults', async () => {
@@ -185,8 +189,41 @@ describe('ConfigService', () => {
         document.documentElement.dir = 'ltr'
     })
 
+    it('keeps a changeset comment draft per server', async () => {
+        const stored = new Map<string, unknown>([
+            ['changeSetComment:dev', 'Dev test'],
+        ])
+        const storage = {
+            get: vi.fn(async (key: string) => stored.get(key) ?? null),
+            set: vi.fn(async (key: string, value: unknown) => {
+                stored.set(key, value)
+            }),
+            remove: vi.fn().mockResolvedValue(undefined),
+        }
+        TestBed.configureTestingModule({
+            providers: [
+                { provide: AppStorage, useValue: storage },
+                { provide: HttpClient, useValue: {} },
+                { provide: TranslateService, useValue: {} },
+                {
+                    provide: DataService,
+                    useValue: { resetStoredOsmState: vi.fn() },
+                },
+            ],
+        })
+        const service = TestBed.inject(ConfigService)
+        service.setChangeSetComment('Survey in Guérande')
+
+        await service.setIsDevServer(true)
+        expect(service.getChangeSetComment()).toBe('Dev test')
+
+        await service.setIsDevServer(false)
+        expect(service.getChangeSetComment()).toBe('Survey in Guérande')
+    })
+
     it('sets the OSM data aside through DataService when switching servers', async () => {
         const storage = {
+            get: vi.fn().mockResolvedValue(null),
             set: vi.fn().mockResolvedValue(undefined),
             remove: vi.fn().mockResolvedValue(undefined),
         }
@@ -584,6 +621,27 @@ describe('ConfigService', () => {
         })
     })
 
+    describe('interface language', () => {
+        const offered = ['en', 'fr', 'de', 'zh-CN', 'zh-TW']
+        it.each([
+            ['fr', [], 'fr'],
+            ['da', ['da-DK'], 'en'],
+            ['zh', ['zh-TW'], 'zh-TW'],
+            ['zh', ['zh-HK'], 'zh-TW'],
+            ['zh', ['zh-CN'], 'zh-CN'],
+            ['zh', ['zh-Hans-SG'], 'zh-CN'],
+            ['zh', [], 'zh-CN'],
+            ['zh', ['fr-FR'], 'zh-CN'],
+        ])(
+            'resolves %s preferred as %j to %s',
+            (requested, preferred, expected) => {
+                expect(resolveUiLanguage(requested, offered, preferred)).toBe(
+                    expected
+                )
+            }
+        )
+    })
+
     describe('default country', () => {
         it.each([
             [['fr'], 'FR'],
@@ -595,6 +653,8 @@ describe('ConfigService', () => {
             [['en-GB'], 'GB'],
             [[], 'GB'],
             [['not a locale'], 'GB'],
+            [['es-419'], 'GB'],
+            [['es-419', 'es-MX'], 'MX'],
         ])('derives the country of %j as %s', (languages, expected) => {
             expect(defaultCountryFromLocale(languages)).toBe(expected)
         })

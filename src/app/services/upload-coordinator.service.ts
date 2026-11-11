@@ -26,6 +26,7 @@ import {
 } from '@services/osm-upload-validation'
 import { matchUploadAgainstChangeset } from '@services/osm-upload-verification'
 import {
+    OSM_UPLOAD_TIMEOUT_MS,
     type OsmApiObject,
     OsmApiService,
     type OsmDiffResult,
@@ -33,7 +34,12 @@ import {
 import { TagsService } from '@services/tags.service'
 import { firstValueFrom, type Observable } from 'rxjs'
 import { take } from 'rxjs/operators'
-import { type RebaseOutcome, rebaseOnRemote } from './osm-rebase'
+import {
+    currentVersionOf,
+    type RebaseOutcome,
+    type RebaseResolution,
+    rebaseOnRemote,
+} from './osm-rebase'
 
 export type UploadSummary = PersistedUploadSummary
 
@@ -843,8 +849,10 @@ export class UploadCoordinator {
 
     /**
      * A `notFound` check confirms the attempt was not applied only when it was
-     * made long enough after the failure seen in this session, or after the
-     * start of an attempt left by a previous session.
+     * made long enough after the failure seen in this session. For an attempt
+     * left by a previous session the moment of the failure is unknown: the
+     * request may have stayed in flight until the upload timeout, so the delay
+     * counts from the latest moment it could still have been sent.
      */
     private verificationExtras(
         journal: PreparedJournal,
@@ -855,7 +863,7 @@ export class UploadCoordinator {
         const failedAt =
             this.lostAnswer?.attemptId === journal.attemptId
                 ? this.lostAnswer.at
-                : Date.parse(journal.startedAt)
+                : Date.parse(journal.startedAt) + OSM_UPLOAD_TIMEOUT_MS
         const confirmableAt =
             (Number.isFinite(failedAt) ? failedAt : checkedAt) +
             NOT_APPLIED_CONFIRMATION_DELAY_MS
@@ -1631,11 +1639,62 @@ export class UploadCoordinatorService {
     }
 
     /**
-     * Re-applies a pending edit that lost a version conflict on top of the
-     * current OpenStreetMap version. Nothing is changed when tags or position
-     * overlap, or when the nodes or members of the object changed.
+     * Compares a pending edit that lost a version conflict with the current
+     * OpenStreetMap version, without changing anything.
      */
-    async rebasePendingFeature(id: string): Promise<RebaseOutcome> {
+    previewRebase(id: string): Promise<RebaseOutcome> {
+        return this.rebaseOnCurrentVersion(id, {}, false)
+    }
+
+    /**
+     * Re-applies a pending edit that lost a version conflict on top of the
+     * current OpenStreetMap version, with the user's choice for each overlap.
+     * Nothing is changed while an overlap is left, or when the nodes or
+     * members of the object changed.
+     */
+    rebasePendingFeature(
+        id: string,
+        resolution: RebaseResolution = {}
+    ): Promise<RebaseOutcome> {
+        return this.rebaseOnCurrentVersion(id, resolution, true)
+    }
+
+    /**
+     * Drops a pending edit that lost a version conflict and shows the current
+     * OpenStreetMap version instead of the outdated one it started from.
+     */
+    async discardConflictedChange(id: string): Promise<void> {
+        const pending = this.dataService.getFeatureById(id, 'data_changed')
+        let current: OsmGoFeature | undefined
+        if (pending) {
+            try {
+                const remote = await firstValueFrom(
+                    this.osmApi.getOsmObjectById$(id)
+                )
+                current = currentVersionOf(pending, remote, (feature) =>
+                    this.refreshDerivedData(feature)
+                )
+            } catch (error) {
+                if ((error as { status?: unknown })?.status === 410) {
+                    // Deleted on OpenStreetMap: nothing is left to restore.
+                    await this.dataService.discardGoneFeature(id)
+                    this.redrawMarkers()
+                    return
+                }
+                // Offline: the outdated version is shown until the next
+                // download, as for any discarded change.
+                console.warn('The current OSM version is unavailable.', error)
+            }
+        }
+        await this.dataService.cancelPendingChange(id, current)
+        this.redrawMarkers()
+    }
+
+    private async rebaseOnCurrentVersion(
+        id: string,
+        resolution: RebaseResolution,
+        save: boolean
+    ): Promise<RebaseOutcome> {
         const pending = this.dataService.getFeatureById(id, 'data_changed')
         if (!pending) return { kind: 'unsupported' }
         let remote: OsmApiObject
@@ -1647,10 +1706,13 @@ export class UploadCoordinatorService {
             }
             throw error
         }
-        const outcome = rebaseOnRemote(pending, remote, (feature) =>
-            this.refreshDerivedData(feature)
+        const outcome = rebaseOnRemote(
+            pending,
+            remote,
+            (feature) => this.refreshDerivedData(feature),
+            resolution
         )
-        if (outcome.kind === 'rebased') {
+        if (save && outcome.kind === 'rebased') {
             await this.dataService.rebasePendingFeature(id, outcome.feature)
             this.redrawMarkers()
         }

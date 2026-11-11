@@ -149,6 +149,8 @@ const createPage = (options: PageHarnessOptions = {}) => {
         getUnsavedReceipt: vi.fn(() => undefined),
         verifyPreparedAttempt: vi.fn(async () => stateSignal()),
         rebasePendingFeature: vi.fn(async () => ({ kind: 'upToDate' })),
+        previewRebase: vi.fn(async () => ({ kind: 'upToDate' })),
+        discardConflictedChange: vi.fn(async () => undefined),
         markAcknowledgedAttemptAsApplied: vi.fn(async () => stateSignal()),
         markPartialAttemptAsApplied: vi.fn(async () => stateSignal()),
         discardPreparedAttemptAsNotApplied: vi.fn(async () => stateSignal()),
@@ -701,13 +703,38 @@ describe('PushDataToOsmPage', () => {
                 },
             }) as const
 
-        it('offers to reapply a modified object on the current version', () => {
+        const differences = [
+            {
+                key: 'colour',
+                mine: 'green',
+                theirs: undefined,
+                origin: 'local',
+            },
+            { key: 'seats', mine: '3', theirs: '5', origin: 'conflict' },
+        ]
+
+        it('offers to reapply a modified object once the merge can succeed', async () => {
             const feature = queuedFeature('Update', 12)
-            const { page } = createPage({
+            const { page, coordinator } = createPage({
                 features: [feature],
                 state: conflictFailure(feature),
+                coordinator: {
+                    previewRebase: vi.fn(async () => ({
+                        kind: 'rebased',
+                        feature,
+                        adoptedRemoteKeys: [],
+                        differences: [differences[0]],
+                    })),
+                },
             })
 
+            const review = page.reviewConflict('node/12')
+            expect(page.canRebase()).toBe(false)
+            await review
+
+            expect(coordinator.previewRebase).toHaveBeenCalledWith('node/12')
+            expect(page.conflictRows()).toEqual([differences[0]])
+            expect(page.hasConflicts()).toBe(false)
             expect(page.canRebase()).toBe(true)
         })
 
@@ -726,6 +753,141 @@ describe('PushDataToOsmPage', () => {
             expect(other.page.canRebase()).toBe(false)
         })
 
+        it('waits for a choice on every overlap and applies the choices', async () => {
+            const feature = queuedFeature('Update', 12)
+            const { page, coordinator } = createPage({
+                features: [feature],
+                state: conflictFailure(feature),
+                coordinator: {
+                    previewRebase: vi.fn(async () => ({
+                        kind: 'conflict',
+                        conflicts: [{ key: 'seats', mine: '3', theirs: '5' }],
+                        position: true,
+                        structure: false,
+                        differences,
+                    })),
+                    rebasePendingFeature: vi.fn(async () => ({
+                        kind: 'rebased',
+                        feature,
+                        adoptedRemoteKeys: [],
+                        differences,
+                    })),
+                },
+            })
+            await page.reviewConflict('node/12')
+
+            expect(page.conflictRows()).toEqual(differences)
+            expect(page.positionConflict()).toBe(true)
+            expect(page.canRebase()).toBe(false)
+            page.chooseTag('seats', 'theirs')
+            expect(page.canRebase()).toBe(false)
+            page.choosePosition('mine')
+            expect(page.canRebase()).toBe(true)
+
+            await page.rebaseErrorFeature(feature)
+
+            expect(coordinator.rebasePendingFeature).toHaveBeenCalledWith(
+                'node/12',
+                { tags: { seats: 'theirs' }, position: 'mine' }
+            )
+            expect(coordinator.resetTerminalState).toHaveBeenCalledOnce()
+            expect(page.conflictReview()).toBeUndefined()
+        })
+
+        it('only offers to drop the edit when nodes or members changed', async () => {
+            const feature = queuedFeature('Update', 12)
+            const { page } = createPage({
+                features: [feature],
+                state: conflictFailure(feature),
+                coordinator: {
+                    previewRebase: vi.fn(async () => ({
+                        kind: 'conflict',
+                        conflicts: [],
+                        position: false,
+                        structure: true,
+                        differences: [],
+                    })),
+                },
+            })
+            await page.reviewConflict('node/12')
+
+            expect(page.structureConflict()).toBe(true)
+            expect(page.canRebase()).toBe(false)
+        })
+
+        it('keeps the reapply button when the comparison failed', async () => {
+            vi.spyOn(console, 'error').mockReturnValue(undefined)
+            const feature = queuedFeature('Update', 12)
+            const { page } = createPage({
+                features: [feature],
+                state: conflictFailure(feature),
+                coordinator: {
+                    previewRebase: vi.fn(async () => {
+                        throw new Error('offline')
+                    }),
+                },
+            })
+            await page.reviewConflict('node/12')
+
+            expect(page.conflictReview()?.failed).toBe(true)
+            expect(page.canRebase()).toBe(true)
+        })
+
+        it('shows the current OSM version again when the conflicting edit is dropped', async () => {
+            const feature = queuedFeature('Update', 12)
+            const { page, coordinator, dataService } = createPage({
+                features: [feature],
+                state: conflictFailure(feature),
+            })
+
+            await page.cancelErrorFeature(feature)
+
+            expect(coordinator.discardConflictedChange).toHaveBeenCalledWith(
+                'node/12'
+            )
+            expect(dataService.cancelPendingChange).not.toHaveBeenCalled()
+            expect(coordinator.resetTerminalState).toHaveBeenCalledOnce()
+        })
+
+        it('checks OpenStreetMap again when the object is gone (410)', async () => {
+            const feature = queuedFeature('Update', 12)
+            const failure = conflictFailure(feature)
+            const { page, coordinator, dataService } = createPage({
+                features: [feature],
+                state: {
+                    ...failure,
+                    error: {
+                        ...failure.error,
+                        status: 410,
+                        code: 'uploadRejected',
+                    },
+                } as never,
+            })
+
+            await page.cancelErrorFeature(feature)
+
+            expect(coordinator.discardConflictedChange).toHaveBeenCalledWith(
+                'node/12'
+            )
+            expect(dataService.cancelPendingChange).not.toHaveBeenCalled()
+        })
+
+        it('also shows the current OSM version when a conflicting deletion is dropped', async () => {
+            const feature = queuedFeature('Delete', 12)
+            const { page, coordinator, dataService } = createPage({
+                features: [feature],
+                state: conflictFailure(feature),
+            })
+
+            expect(page.isConflictReview()).toBe(false)
+            await page.cancelErrorFeature(feature)
+
+            expect(coordinator.discardConflictedChange).toHaveBeenCalledWith(
+                'node/12'
+            )
+            expect(dataService.cancelPendingChange).not.toHaveBeenCalled()
+        })
+
         it('clears the error and invites a new upload once the change is rebased', async () => {
             const feature = queuedFeature('Update', 12)
             const { page, coordinator, snackBarOpen, mapService } = createPage({
@@ -736,6 +898,7 @@ describe('PushDataToOsmPage', () => {
                         kind: 'rebased',
                         feature,
                         adoptedRemoteKeys: [],
+                        differences: [],
                     })),
                 },
             })
@@ -743,7 +906,8 @@ describe('PushDataToOsmPage', () => {
             await page.rebaseErrorFeature(feature)
 
             expect(coordinator.rebasePendingFeature).toHaveBeenCalledWith(
-                'node/12'
+                'node/12',
+                {}
             )
             expect(coordinator.resetTerminalState).toHaveBeenCalledOnce()
             expect(mapService.redrawChangedMarkers).toHaveBeenCalled()
@@ -752,33 +916,7 @@ describe('PushDataToOsmPage', () => {
                 'SHARED.CLOSE',
                 expect.anything()
             )
-            expect(page.rebaseConflict()).toBeUndefined()
-        })
-
-        it('lists the overlapping tags and keeps the error when it cannot merge', async () => {
-            const feature = queuedFeature('Update', 12)
-            const { page, coordinator } = createPage({
-                features: [feature],
-                state: conflictFailure(feature),
-                coordinator: {
-                    rebasePendingFeature: vi.fn(async () => ({
-                        kind: 'conflict',
-                        conflicts: [{ key: 'name' }, { key: 'phone' }],
-                        position: true,
-                        structure: false,
-                    })),
-                },
-            })
-
-            await page.rebaseErrorFeature(feature)
-
-            expect(page.rebaseConflict()).toEqual({
-                keys: ['name', 'phone'],
-                position: true,
-                structure: false,
-            })
-            expect(coordinator.resetTerminalState).not.toHaveBeenCalled()
-            expect(page.rebasing()).toBe(false)
+            expect(page.conflictReview()).toBeUndefined()
         })
 
         it('reports an object deleted on OpenStreetMap and a failed fetch', async () => {

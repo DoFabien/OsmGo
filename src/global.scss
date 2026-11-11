@@ -80,3 +80,8 @@ button.mat-mdc-icon-button.mat-mdc-button-base {
 .mat-mdc-snack-bar-container.osmgo-snackbar-top {
     margin-top: calc(max(14px, env(safe-area-inset-top)) + 64px);
 }
+
+// Messages of screens with a fixed action bar stay above it, not on its buttons.
+.mat-mdc-snack-bar-container.osmgo-snackbar-above-footer {
+    margin-bottom: calc(env(safe-area-inset-bottom) + 84px);
+}

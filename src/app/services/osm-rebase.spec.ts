@@ -1,5 +1,5 @@
 import type { OsmGoFeature } from '@osmgo/type'
-import { rebaseOnRemote } from './osm-rebase'
+import { currentVersionOf, rebaseOnRemote } from './osm-rebase'
 
 const node = (
     tags: Record<string, string>,
@@ -116,7 +116,85 @@ describe('rebasing a pending edit on the current OSM version', () => {
             ],
             position: false,
             structure: false,
+            differences: [
+                {
+                    key: 'name',
+                    mine: 'Mine',
+                    theirs: 'Theirs',
+                    origin: 'conflict',
+                },
+            ],
         })
+    })
+
+    it('lists each differing tag with the side its value comes from', () => {
+        const pending = pendingUpdate(base, {
+            amenity: 'cafe',
+            name: 'Mine',
+            website: 'https://cafe.example',
+        })
+
+        const outcome = rebaseOnRemote(
+            pending,
+            remoteNode({ amenity: 'cafe', name: 'Theirs', phone: '1' }, 4),
+            identity
+        )
+
+        expect(
+            outcome.kind === 'conflict' &&
+                outcome.differences.map(({ key, origin }) => [key, origin])
+        ).toEqual([
+            ['name', 'conflict'],
+            ['phone', 'remote'],
+            ['website', 'local'],
+        ])
+    })
+
+    it('applies the value chosen for each overlapping tag', () => {
+        const pending = pendingUpdate(base, { amenity: 'bench' })
+
+        const outcome = rebaseOnRemote(
+            pending,
+            remoteNode({ amenity: 'cafe', name: 'Theirs' }, 4),
+            identity,
+            { tags: { amenity: 'mine', name: 'theirs' } }
+        )
+
+        expect(outcome.kind).toBe('rebased')
+        expect(
+            outcome.kind === 'rebased' && outcome.feature.properties.tags
+        ).toEqual({ amenity: 'bench', name: 'Theirs' })
+    })
+
+    it('removes a tag when the chosen OpenStreetMap side has none', () => {
+        const pending = pendingUpdate(base, { amenity: 'cafe', name: 'Mine' })
+
+        const outcome = rebaseOnRemote(
+            pending,
+            remoteNode({ amenity: 'cafe' }, 4),
+            identity,
+            { tags: { name: 'theirs' } }
+        )
+
+        expect(
+            outcome.kind === 'rebased' && outcome.feature.properties.tags
+        ).toEqual({ amenity: 'cafe' })
+    })
+
+    it('keeps the overlaps that were not chosen yet', () => {
+        const pending = pendingUpdate(base, { amenity: 'bar', name: 'Mine' })
+
+        const outcome = rebaseOnRemote(
+            pending,
+            remoteNode({ amenity: 'pub', name: 'Theirs' }, 4),
+            identity,
+            { tags: { name: 'mine' } }
+        )
+
+        expect(
+            outcome.kind === 'conflict' &&
+                outcome.conflicts.map(({ key }) => key)
+        ).toEqual(['amenity'])
     })
 
     it('follows a node moved remotely and keeps a node moved locally', () => {
@@ -155,6 +233,33 @@ describe('rebasing a pending edit on the current OSM version', () => {
         )
 
         expect(outcome).toMatchObject({ kind: 'conflict', position: true })
+    })
+
+    it('uses the position chosen for a node moved on both sides', () => {
+        const pending = pendingUpdate(
+            base,
+            base.properties.tags as Record<string, string>,
+            [3, 48]
+        )
+        const remote = remoteNode({ amenity: 'cafe', name: 'Cafe' }, 4, {
+            lat: 49,
+        })
+
+        const theirs = rebaseOnRemote(pending, remote, identity, {
+            position: 'theirs',
+        })
+        const mine = rebaseOnRemote(pending, remote, identity, {
+            position: 'mine',
+        })
+
+        expect(theirs.kind === 'rebased' && theirs.feature.geometry).toEqual({
+            type: 'Point',
+            coordinates: [2, 49],
+        })
+        expect(mine.kind === 'rebased' && mine.feature.geometry).toEqual({
+            type: 'Point',
+            coordinates: [3, 48],
+        })
     })
 
     it('does nothing when the base is already the current version', () => {
@@ -257,6 +362,52 @@ describe('rebasing a pending edit on the current OSM version', () => {
             expect(outcome.kind).toBe(kind)
         }
     )
+
+    it('rebuilds the current OpenStreetMap version of a dropped edit', () => {
+        const pending = pendingUpdate(base, { amenity: 'cafe', name: 'Mine' })
+
+        const current = currentVersionOf(
+            pending,
+            remoteNode({ amenity: 'cafe', name: 'Theirs' }, 4, { lat: 49 }),
+            identity
+        )
+
+        expect(current?.properties.tags).toEqual({
+            amenity: 'cafe',
+            name: 'Theirs',
+        })
+        expect(current?.properties.meta.version).toBe(4)
+        expect(current?.geometry).toEqual({
+            type: 'Point',
+            coordinates: [2, 49],
+        })
+        expect(current?.properties.changeType).toBeUndefined()
+        expect(current?.properties.originalData).toBeUndefined()
+    })
+
+    it('cannot rebuild a deleted object or a way whose nodes changed', () => {
+        const wayBase = {
+            ...node({ highway: 'path' }, 2),
+            id: 'way/7',
+            ndRefs: [1, 2, 3],
+        } as unknown as OsmGoFeature
+        wayBase.properties.type = 'way'
+
+        expect(
+            currentVersionOf(
+                pendingUpdate(base, { amenity: 'bar' }),
+                remoteNode({}, 4, { visible: false }),
+                identity
+            )
+        ).toBeUndefined()
+        expect(
+            currentVersionOf(
+                pendingUpdate(wayBase, { highway: 'footway' }),
+                { type: 'way', id: 7, version: 3, nodes: [1, 2, 4] },
+                identity
+            )
+        ).toBeUndefined()
+    })
 
     it('only rebases pending modifications', () => {
         const created = node({ amenity: 'cafe' }, 0)

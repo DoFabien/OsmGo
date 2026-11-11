@@ -586,6 +586,36 @@ describe('ObjectSheetComponent swipes', () => {
         })
     })
 
+    it('removes a bank that is gone from its building and keeps the building', () => {
+        dialog.open.mockReturnValueOnce({ afterClosed: () => of(true) })
+        const selection = selectionWith(2, 'bank', '#EF9228')
+        selection.geojson.id = 'way/2'
+        selection.geojson.properties.type = 'way'
+        selection.geojson.properties.tags = {
+            amenity: 'bank',
+            name: 'Banque du Port',
+            building: 'yes',
+            'addr:street': 'Rue du Port',
+        }
+        const fixture = TestBed.createComponent(ObjectSheetComponent)
+        fixture.componentRef.setInput('selection', selection)
+        fixture.detectChanges()
+
+        fixture.componentInstance.handleSurveyNo()
+
+        expect(osmApi.deleteOsmElement).not.toHaveBeenCalled()
+        expect(osmApi.updateOsmElement).toHaveBeenCalledWith(
+            expect.objectContaining({
+                id: 'way/2',
+                properties: expect.objectContaining({
+                    tags: { building: 'yes', 'addr:street': 'Rue du Port' },
+                    primaryTag: { key: 'building', value: 'yes' },
+                }),
+            }),
+            'data'
+        )
+    })
+
     it('starts editing a deprecated replacement without mutating the read feature', () => {
         const fixture = TestBed.createComponent(ObjectSheetComponent)
         const selection = selectionWith(1, 'information', '#9d7178')
@@ -771,11 +801,11 @@ describe('ObjectSheetComponent swipes', () => {
             })
         })
 
-        it('keeps the other date key and brings it to the same day', () => {
+        it('refreshes the date key the object already has instead of adding one', () => {
             const tags = confirmSurvey({ check_date: '2020-01-01' })
 
             expect(tags['check_date']).toEqual(today)
-            expect(tags['check_date']).toBe(tags['survey:date'])
+            expect(tags).not.toHaveProperty('survey:date')
         })
 
         it('works the same way when check_date is the configured key', () => {
@@ -783,8 +813,8 @@ describe('ObjectSheetComponent swipes', () => {
 
             const tags = confirmSurvey({ 'survey:date': '2019-05-05' })
 
-            expect(tags['check_date']).toEqual(today)
-            expect(tags['survey:date']).toBe(tags['check_date'])
+            expect(tags['survey:date']).toEqual(today)
+            expect(tags).not.toHaveProperty('check_date')
         })
 
         it('never removes other tags', () => {
@@ -808,6 +838,23 @@ describe('ObjectSheetComponent swipes', () => {
             fixture.detectChanges()
             return fixture
         }
+
+        it('offers no edit and no survey on an object waiting to be deleted', () => {
+            const deleted = pendingSheet('Delete')
+            const updated = pendingSheet('Update')
+            const editButton = '[data-testid="edit-selected-poi"]'
+
+            expect(deleted.nativeElement.querySelector(editButton)).toBeNull()
+            expect(deleted.componentInstance.shouldShowSurveyCard()).toBe(false)
+            expect(
+                deleted.nativeElement.querySelector(
+                    '.sheet-notice--pending button'
+                )
+            ).not.toBeNull()
+            expect(
+                updated.nativeElement.querySelector(editButton)
+            ).not.toBeNull()
+        })
 
         it('labels the banner action as discarding local changes', () => {
             const fixture = pendingSheet('Update')

@@ -72,9 +72,15 @@ describe('ObjectEditorContentComponent', () => {
             geometry?: unknown
             changeType?: 'Create' | 'Update' | 'Delete'
             osmApi?: Record<string, any>
+            osmType?: 'node' | 'way'
+            baselineTags?: Record<string, string | number>
         } = {}
     ) {
         const feature = featureWith(1, tags)
+        if (options.osmType) {
+            feature.id = `${options.osmType}/1`
+            feature.properties.type = options.osmType
+        }
         if (options.geometry) {
             feature.geometry = options.geometry as typeof feature.geometry
         }
@@ -147,6 +153,9 @@ describe('ObjectEditorContentComponent', () => {
         fixture.componentRef.setInput('data', feature)
         fixture.componentRef.setInput('type', type)
         fixture.componentRef.setInput('origineData', 'data')
+        if (options.baselineTags) {
+            fixture.componentRef.setInput('baselineTags', options.baselineTags)
+        }
         fixture.detectChanges()
         const page = fixture.componentInstance
         return {
@@ -160,6 +169,60 @@ describe('ObjectEditorContentComponent', () => {
             nestedDialogRef,
         }
     }
+
+    it('deletes a bank mapped on a building without deleting the building', () => {
+        const updated = vi.fn((feature) => of(feature))
+        const { page, fixture, dialog, osmApi } = createPage(
+            {
+                amenity: 'bank',
+                name: 'Banque du Port',
+                building: 'yes',
+                'addr:housenumber': '3',
+            },
+            'Update',
+            {
+                osmType: 'way',
+                dialogResult: true,
+                tagsService: {
+                    findPkey: () => ({ key: 'amenity', value: 'bank' }),
+                },
+                osmApi: {
+                    updateOsmElement: updated,
+                    deleteOsmElement: vi.fn(),
+                },
+            }
+        )
+        const deleteButton = fixture.debugElement.query(
+            By.css('.delete-action')
+        )
+
+        expect(deleteButton).not.toBeNull()
+        deleteButton.nativeElement.click()
+
+        expect(dialog.open).toHaveBeenCalled()
+        expect(osmApi['deleteOsmElement']).not.toHaveBeenCalled()
+        expect(updated).toHaveBeenCalledWith(
+            expect.objectContaining({
+                properties: expect.objectContaining({
+                    tags: { building: 'yes', 'addr:housenumber': '3' },
+                    primaryTag: { key: 'building', value: 'yes' },
+                }),
+            }),
+            'data'
+        )
+        expect(page.feature.properties.tags['amenity']).toBeUndefined()
+    })
+
+    it('offers no delete for an outline that is not a building', () => {
+        const { fixture } = createPage({ amenity: 'parking' }, 'Update', {
+            osmType: 'way',
+            tagsService: {
+                findPkey: () => ({ key: 'amenity', value: 'parking' }),
+            },
+        })
+
+        expect(fixture.debugElement.query(By.css('.delete-action'))).toBeNull()
+    })
 
     it('creates an empty editable field without an undefined key', () => {
         const { page } = createPage({ amenity: 'toilets' })
@@ -255,7 +318,7 @@ describe('ObjectEditorContentComponent', () => {
         })
     })
 
-    it('keeps and refreshes the other survey date key when saving', () => {
+    it('refreshes the date key the object already has instead of adding one', () => {
         const { page } = createPage({
             amenity: 'toilets',
             check_date: '2021-05-04',
@@ -266,14 +329,13 @@ describe('ObjectEditorContentComponent', () => {
         const dates = page.tags.filter(
             (tag) => tag.key === 'survey:date' || tag.key === 'check_date'
         )
-        expect(dates.map((tag) => tag.key).sort()).toEqual([
-            'check_date',
-            'survey:date',
+        expect(dates).toEqual([
+            {
+                key: 'check_date',
+                value: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+            },
         ])
-        for (const tag of dates) {
-            expect(tag.value).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-            expect(tag.value).not.toBe('2021-05-04')
-        }
+        expect(dates[0].value).not.toBe('2021-05-04')
     })
 
     it('remembers only reusable attributes for the current category', () => {
@@ -1118,6 +1180,32 @@ describe('ObjectEditorContentComponent', () => {
             expect(banner.textContent).toContain('MAIN.SELECTION.REVERT_LOCAL')
             expect(banner.textContent).not.toContain('SHARED.CLEAR')
         })
+
+        it('hides the banner while a text field has the focus', () => {
+            const { fixture } = createPage({ amenity: 'toilets' }, 'Update', {
+                changeType: 'Update',
+            })
+            fixture.detectChanges()
+            const host = fixture.nativeElement as HTMLElement
+            const input = document.createElement('input')
+            const checkbox = document.createElement('input')
+            checkbox.type = 'checkbox'
+            host.append(input, checkbox)
+            const banner = () => host.querySelector('.modified-warning')
+
+            input.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+            fixture.detectChanges()
+            expect(banner()).toBeNull()
+
+            input.dispatchEvent(
+                new FocusEvent('focusout', {
+                    bubbles: true,
+                    relatedTarget: checkbox,
+                })
+            )
+            fixture.detectChanges()
+            expect(banner()).not.toBeNull()
+        })
     })
 
     it('opens a relation made of several geometries without failing', () => {
@@ -1130,6 +1218,38 @@ describe('ObjectEditorContentComponent', () => {
 
         expect(page.geometryType).toBe('area')
         expect(page.typeFiche).toBe('Edit')
+    })
+
+    it('hands the draft and the original tags over when the object is moved', () => {
+        const { page } = createPage({ amenity: 'bench', name: 'Before' })
+        const dismissed = vi.fn()
+        page.dismissed.subscribe(dismissed)
+        page.findElement(page.tags, { key: 'name' }).value = 'After'
+
+        page.moveOsmElement()
+
+        expect(dismissed).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'Move',
+                mode: 'Update',
+                moved: false,
+                baselineTags: { amenity: 'bench', name: 'Before' },
+            })
+        )
+        expect(dismissed.mock.calls[0][0].geojson.properties.tags.name).toBe(
+            'After'
+        )
+    })
+
+    it('still counts a draft as unsaved when reopened with its original tags', () => {
+        const { page } = createPage(
+            { amenity: 'bench', name: 'After' },
+            'Update',
+            { baselineTags: { amenity: 'bench', name: 'Before' } }
+        )
+
+        expect(page.dataIsChanged()).toBe(true)
+        expect(page.changedFieldCount()).toBe(1)
     })
 
     it('keeps the Create mode when a deprecated tag is fixed', () => {

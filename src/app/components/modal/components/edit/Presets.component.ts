@@ -79,8 +79,13 @@ export class EditPresets {
         return type === 'number' ? 'text' : type || 'text'
     }
 
+    /** Positive integers (seats, levels…) get a digit keypad; `layer=-1` needs the minus. */
     get inputMode(): string | null {
-        return this.preset().type === 'number' ? 'decimal' : null
+        const preset = this.preset()
+        if (preset.type !== 'number') return null
+        return preset.iDtype === 'integer' && (preset.minValue ?? -1) >= 0
+            ? 'numeric'
+            : 'decimal'
     }
 
     get valueLimitReached(): boolean {

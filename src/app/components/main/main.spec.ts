@@ -1302,6 +1302,8 @@ describe('MainPage', () => {
         expect(page.selectedFeature()).toMatchObject({
             type: 'Update',
             geojson: correctedFeature,
+            // the correction is a draft to save, not the state of the object
+            baselineTags: {},
         })
         expect(page.sheetLevel()).toBe('expanded')
     })
@@ -1722,5 +1724,39 @@ describe('MainPage', () => {
 
         expect(moveElement).toHaveBeenCalledWith(movedFeature)
         expect(page.selectedFeature()?.geojson).toBe(movedFeature.geojson)
+    })
+
+    it('gives the editor its unsaved draft back once the move ends', () => {
+        const showModal$ = new Subject<any>()
+        const geojson = { id: 'node/1', properties: { tags: { name: 'B' } } }
+        const { page } = createPage({
+            mapService: {
+                showModal$,
+                moveElement: vi.fn(),
+                setCenterInUrl: vi.fn(),
+            },
+        })
+        showModal$.next({ type: 'Update', geojson, origineData: 'data' })
+
+        page.handleSheetSession({
+            type: 'Move',
+            geojson,
+            mode: 'Update',
+            baselineTags: { name: 'A' },
+            moved: true,
+        } as any)
+        // the move is cancelled: the map service reopens the editor
+        showModal$.next({ type: 'Update', geojson, origineData: 'data' })
+
+        expect(page.selectedFeature()).toMatchObject({
+            type: 'Update',
+            baselineTags: { name: 'A' },
+            // an earlier move of the same session is not forgotten
+            newPosition: true,
+        })
+
+        // any later selection starts clean
+        showModal$.next({ type: 'Update', geojson, origineData: 'data' })
+        expect(page.selectedFeature()?.baselineTags).toBeUndefined()
     })
 })

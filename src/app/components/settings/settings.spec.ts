@@ -16,6 +16,8 @@ describe('SettingsPage', () => {
     const state = {
         pending: 0,
         journal: false,
+        quarantined: 0,
+        backups: [] as unknown[],
         dataUploading: signal(false),
         coordinatorUploading: signal(false),
         isDevServer: false,
@@ -82,6 +84,8 @@ describe('SettingsPage', () => {
                     useValue: {
                         changedFeatureCount: () => state.pending,
                         hasActiveUploadJournal: () => state.journal,
+                        quarantinedCount: () => state.quarantined,
+                        getStateBackups: async () => state.backups,
                         uploadInFlight: state.dataUploading,
                         clearCache,
                     },
@@ -133,6 +137,8 @@ describe('SettingsPage', () => {
     beforeEach(() => {
         state.pending = 0
         state.journal = false
+        state.quarantined = 0
+        state.backups = []
         state.dataUploading.set(false)
         state.coordinatorUploading.set(false)
         state.isDevServer = false
@@ -240,6 +246,37 @@ describe('SettingsPage', () => {
             expect(dialogData()['message']).toContain(
                 'SETTINGS.DELETE_CACHE_UNRESOLVED_UPLOAD'
             )
+        })
+
+        it('warns that unreadable edits set aside are erased too', async () => {
+            state.quarantined = 3
+            const page = createPage()
+
+            await page.deleteCache()
+
+            expect(dialogData()['message']).toContain(
+                'SEND_DATA.QUARANTINE_MESSAGE'
+            )
+        })
+
+        it('warns that state backups are erased too', async () => {
+            state.backups = [{ key: 'osmStateBackup:1' }]
+            const page = createPage()
+
+            await page.deleteCache()
+
+            expect(dialogData()['message']).toContain(
+                'SEND_DATA.STATE_BACKUP_MESSAGE'
+            )
+        })
+
+        it('does not mention set-aside edits when there are none', async () => {
+            const page = createPage()
+
+            await page.deleteCache()
+
+            expect(dialogData()['message']).not.toContain('QUARANTINE')
+            expect(dialogData()['message']).not.toContain('STATE_BACKUP')
         })
 
         it('refuses while an upload is running', async () => {

@@ -219,6 +219,23 @@ export class SettingsPage {
                 )
             )
         }
+        // Unreadable edits set aside at start-up are kept in the same storage:
+        // clearing it destroys the only copy of what could not be recovered.
+        const quarantinedCount = this.dataService.quarantinedCount()
+        if (quarantinedCount > 0) {
+            messages.push(
+                this.translate.instant('SEND_DATA.QUARANTINE_MESSAGE', {
+                    count: quarantinedCount,
+                })
+            )
+        }
+        // Copies kept by a reset or a change of server live there as well.
+        const backups = await this.dataService.getStateBackups().catch(() => [])
+        if (backups.length > 0) {
+            messages.push(
+                this.translate.instant('SEND_DATA.STATE_BACKUP_MESSAGE')
+            )
+        }
         const confirmed = await this.confirm({
             title: this.translate.instant(
                 'SETTINGS.DELETE_CACHE_CONFIRM_TITLE'

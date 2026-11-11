@@ -465,6 +465,31 @@ describe('DataService', () => {
             expect(service.getGeojson().features).toEqual([original])
         })
 
+        it('shows the current OSM version instead of the original when it is given', async () => {
+            const original = osmFeature(10)
+            await service.applyDownload(download([original]))
+            await service.markPendingDeleted('node/10')
+            const current = osmFeature(10)
+            current.properties.tags = { amenity: 'bench', seats: '5' }
+            current.properties.meta.version = 2
+
+            await service.cancelPendingChange('node/10', current)
+
+            expect(service.getGeojsonChanged().features).toEqual([])
+            expect(service.getGeojson().features).toEqual([current])
+        })
+
+        it('drops a change on an object deleted on OpenStreetMap without restoring it', async () => {
+            const original = osmFeature(10)
+            await service.applyDownload(download([original]))
+            await service.markPendingDeleted('node/10')
+
+            await service.discardGoneFeature('node/10')
+
+            expect(service.getGeojsonChanged().features).toEqual([])
+            expect(service.getGeojson().features).toEqual([])
+        })
+
         it('rejects cancellation when an update has lost its original data', async () => {
             const invalid = osmFeature(10, 'Update', null)
             await service.replacePendingFeatures(collection([invalid]))

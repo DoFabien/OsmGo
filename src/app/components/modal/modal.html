@@ -45,6 +45,7 @@
             [tagConfig]="tagConfig"
             [language]="configService.config().languageTags"
             [countryCode]="configService.config().countryTags"
+            [canFix]="canFixDeprecated()"
             (fixDeprecated)="fixDeprecated($event)"
         ></app-alert>
         <primary-key
@@ -129,7 +130,7 @@
     </div>
 
     <footer class="editor-footer">
-        @if (feature.properties.changeType) {
+        @if (feature.properties.changeType && !typing()) {
         <div class="modified-warning">
             <mat-icon fontSet="material-symbols-rounded"
                 >pending_actions</mat-icon
@@ -169,8 +170,8 @@
                         >open_with</mat-icon
                     >
                 </button>
-                } @if (feature.properties.type === 'node' && mode === 'Update')
-                {
+                } @if (mode === 'Update' && (feature.properties.type === 'node'
+                || buildingTagsWithoutPlace())) {
                 <button
                     mat-icon-button
                     class="delete-action"

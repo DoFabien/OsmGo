@@ -21,6 +21,24 @@ button {
     left: 14px;
 }
 
+// Above the action dock: the top toasts would cover it under the menu button.
+.map-control--compass {
+    right: 14px;
+    bottom: calc(
+        var(--map-controls-bottom, max(46px, env(safe-area-inset-bottom))) +
+            80px
+    );
+}
+
+.compass-button mat-icon {
+    color: var(--osmgo-error);
+    font-variation-settings:
+        'FILL' 1,
+        'wght' 500,
+        'GRAD' 0,
+        'opsz' 28;
+}
+
 .map-control--pending {
     top: max(14px, env(safe-area-inset-top));
     right: 14px;
@@ -205,8 +223,7 @@ button {
     overflow: hidden;
 }
 
-.add-button,
-.confirm-button {
+.add-button {
     width: 48px;
     height: 48px;
     color: var(--osmgo-on-amber);
@@ -230,14 +247,45 @@ button {
     justify-self: end;
 }
 
-.confirm-button {
-    color: var(--osmgo-on-blue);
-    background: var(--osmgo-blue);
+.map-action-dock--confirm {
+    right: 14px;
+    left: 14px;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 8px;
+    padding: 6px;
 }
 
-.dock-button--cancel {
-    --mat-icon-button-icon-color: var(--osmgo-error);
+.placement-button {
+    height: 56px;
+    min-width: 0;
+    border-radius: 22px;
+    font-size: 1rem;
+    font-weight: 680;
+    letter-spacing: 0.005em;
+
+    mat-icon {
+        width: 26px;
+        height: 26px;
+        font-size: 26px;
+        font-variation-settings:
+            'FILL' 0,
+            'wght' 600,
+            'GRAD' 0,
+            'opsz' 28;
+    }
+}
+
+.placement-button--cancel {
+    --mat-button-outlined-label-text-color: var(--osmgo-error);
+    --mat-button-outlined-outline-color: var(--osmgo-error);
     color: var(--osmgo-error);
+}
+
+.placement-button--confirm {
+    color: var(--osmgo-on-blue);
+    background: var(--osmgo-blue);
 }
 
 @media (min-width: 768px) {
@@ -245,12 +293,18 @@ button {
         left: 20px;
     }
 
+    // The MapLibre navigation control has its own compass on wide screens.
+    .map-control--compass {
+        display: none;
+    }
+
     .map-control--pending,
     .map-action-dock {
         right: var(--desktop-panel-offset, 20px);
     }
 
-    .map-action-dock--browse {
+    .map-action-dock--browse,
+    .map-action-dock--confirm {
         left: 20px;
         width: auto;
         max-width: 640px;

@@ -130,10 +130,18 @@
         </section>
 
         @if (error(); as uploadError) {
-        <section class="upload-error" data-testid="upload-error" role="alert">
+        <section
+            class="upload-error"
+            data-testid="upload-error"
+            role="alert"
+            [class.upload-error--conflict]="isConflictReview()"
+        >
             <header>
                 <mat-icon fontSet="material-symbols-rounded">error</mat-icon>
-                <h2>OpenStreetMap</h2>
+                <h2>
+                    {{ (isConflictReview() ? 'SEND_DATA.CONFLICT_TITLE' :
+                    'SEND_DATA.UPLOAD_ERROR_TITLE') | translate }}
+                </h2>
             </header>
             <p class="error-message">
                 {{ failureMessageKey(uploadError.code) | translate }}
@@ -149,7 +157,9 @@
                 <div>
                     <dt>{{ 'SEND_DATA.RECOVERY.QUEUE' | translate }}</dt>
                     <dd>
-                        {{ 'SEND_DATA.RECOVERY.QUEUE_PRESERVED' | translate: {
+                        {{ (recoveryQueueCount() === 1 ?
+                        'SEND_DATA.RECOVERY.QUEUE_PRESERVED_ONE' :
+                        'SEND_DATA.RECOVERY.QUEUE_PRESERVED') | translate: {
                         count: recoveryQueueCount() } }}
                     </dd>
                 </div>
@@ -179,7 +189,154 @@
             <p class="error-hint" data-testid="verification-countdown">
                 {{ 'SEND_DATA.VERIFICATION_CHECK_NOW' | translate }}
             </p>
-            } @if (uploadError.feature?.properties?.tags) {
+            } @if (isConflictReview()) {
+            <div class="conflict-review" data-testid="conflict-review">
+                @if (conflictReview(); as review) { @if (!review.outcome &&
+                !review.failed) {
+                <p class="conflict-status">
+                    <mat-spinner diameter="18"></mat-spinner>
+                    {{ 'SEND_DATA.CONFLICT_LOADING' | translate }}
+                </p>
+                } @if (review.failed) {
+                <p class="conflict-status">
+                    {{ 'SEND_DATA.CONFLICT_UNAVAILABLE' | translate }}
+                </p>
+                } @if (conflictRows().length > 0 || positionConflict()) {
+                <table class="conflict-table" data-testid="conflict-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">
+                                {{ 'SEND_DATA.CONFLICT_TAG' | translate }}
+                            </th>
+                            <th scope="col">
+                                {{ 'SEND_DATA.CONFLICT_MINE' | translate }}
+                            </th>
+                            <th scope="col">
+                                {{ 'SEND_DATA.CONFLICT_THEIRS' | translate }}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (row of conflictRows(); track row.key) {
+                        <tr [class.is-conflict]="row.origin === 'conflict'">
+                            <th scope="row">{{ row.key }}</th>
+                            @if (row.origin === 'conflict') {
+                            <td
+                                [class.is-kept]="
+                                    conflictChoices().tags?.[row.key] === 'mine'
+                                "
+                            >
+                                <label class="conflict-choice">
+                                    <input
+                                        type="radio"
+                                        [name]="'conflict-' + row.key"
+                                        [checked]="
+                                            conflictChoices().tags?.[row.key] ===
+                                            'mine'
+                                        "
+                                        (change)="chooseTag(row.key, 'mine')"
+                                    />
+                                    <span
+                                        >{{ row.mine ??
+                                        ('SEND_DATA.CONFLICT_ABSENT' |
+                                        translate) }}</span
+                                    >
+                                </label>
+                            </td>
+                            <td
+                                [class.is-kept]="
+                                    conflictChoices().tags?.[row.key] ===
+                                    'theirs'
+                                "
+                            >
+                                <label class="conflict-choice">
+                                    <input
+                                        type="radio"
+                                        [name]="'conflict-' + row.key"
+                                        [checked]="
+                                            conflictChoices().tags?.[row.key] ===
+                                            'theirs'
+                                        "
+                                        (change)="chooseTag(row.key, 'theirs')"
+                                    />
+                                    <span
+                                        >{{ row.theirs ??
+                                        ('SEND_DATA.CONFLICT_ABSENT' |
+                                        translate) }}</span
+                                    >
+                                </label>
+                            </td>
+                            } @else {
+                            <td [class.is-kept]="row.origin === 'local'">
+                                {{ row.mine ?? ('SEND_DATA.CONFLICT_ABSENT' |
+                                translate) }}
+                            </td>
+                            <td [class.is-kept]="row.origin === 'remote'">
+                                {{ row.theirs ?? ('SEND_DATA.CONFLICT_ABSENT' |
+                                translate) }}
+                            </td>
+                            }
+                        </tr>
+                        } @if (positionConflict()) {
+                        <tr class="is-conflict">
+                            <th scope="row">
+                                {{ 'SEND_DATA.CONFLICT_POSITION' | translate }}
+                            </th>
+                            <td
+                                [class.is-kept]="conflictChoices().position === 'mine'"
+                            >
+                                <label class="conflict-choice">
+                                    <input
+                                        type="radio"
+                                        name="conflict-position"
+                                        [checked]="conflictChoices().position === 'mine'"
+                                        (change)="choosePosition('mine')"
+                                    />
+                                    <span
+                                        >{{ 'SEND_DATA.CONFLICT_MY_POSITION' |
+                                        translate }}</span
+                                    >
+                                </label>
+                            </td>
+                            <td
+                                [class.is-kept]="
+                                    conflictChoices().position === 'theirs'
+                                "
+                            >
+                                <label class="conflict-choice">
+                                    <input
+                                        type="radio"
+                                        name="conflict-position"
+                                        [checked]="
+                                            conflictChoices().position === 'theirs'
+                                        "
+                                        (change)="choosePosition('theirs')"
+                                    />
+                                    <span
+                                        >{{ 'SEND_DATA.CONFLICT_OSM_POSITION' |
+                                        translate }}</span
+                                    >
+                                </label>
+                            </td>
+                        </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="conflict-help">
+                    {{ (hasConflicts() ? 'SEND_DATA.CONFLICT_HELP_CHOOSE' :
+                    'SEND_DATA.CONFLICT_HELP_MERGE') | translate }}
+                </p>
+                } @if (structureConflict()) {
+                <p class="conflict-status">
+                    {{ 'SEND_DATA.REBASE_CONFLICT_STRUCTURE' | translate }}
+                </p>
+                } @if (review.outcome?.kind === 'gone') {
+                <p class="conflict-status">
+                    {{ 'SEND_DATA.REBASE_GONE' | translate }}
+                </p>
+                } }
+            </div>
+            } @else if (uploadError.feature?.properties?.tags) {
             <dl class="error-tags">
                 @for ( item of
                 $safeNavigationMigration(uploadError.feature?.properties?.tags)
@@ -203,7 +360,8 @@
                     <mat-icon fontSet="material-symbols-rounded"
                         >merge_type</mat-icon
                     >
-                    {{ 'SEND_DATA.REBASE_CHANGE' | translate }}
+                    {{ (hasConflicts() ? 'SEND_DATA.APPLY_CHOICES' :
+                    'SEND_DATA.REBASE_CHANGE') | translate }}
                 </button>
                 }
                 <button
@@ -215,26 +373,6 @@
                 >
                     {{ 'SEND_DATA.CANCEL_THIS_CHANGE' | translate }}
                 </button>
-            </div>
-            } @if (rebaseConflict(); as conflict) {
-            <div class="rebase-conflict" data-testid="rebase-conflict">
-                <p>{{ 'SEND_DATA.REBASE_CONFLICT' | translate }}</p>
-                <ul>
-                    @if (conflict.keys.length > 0) {
-                    <li>
-                        {{ 'SEND_DATA.REBASE_CONFLICT_TAGS' | translate: { keys:
-                        conflict.keys.join(', ') } }}
-                    </li>
-                    } @if (conflict.position) {
-                    <li>
-                        {{ 'SEND_DATA.REBASE_CONFLICT_POSITION' | translate }}
-                    </li>
-                    } @if (conflict.structure) {
-                    <li>
-                        {{ 'SEND_DATA.REBASE_CONFLICT_STRUCTURE' | translate }}
-                    </li>
-                    }
-                </ul>
             </div>
             } @if (uploadError.recoveryAction === 'reload') {
             <div class="recovery-actions">

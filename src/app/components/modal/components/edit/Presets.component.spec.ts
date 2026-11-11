@@ -269,6 +269,35 @@ describe('EditPresets', () => {
                 expect(input.getAttribute('maxlength')).toBe('255')
             })
 
+            it('gives a positive integer field a digit keyboard', () => {
+                const seats: Preset = {
+                    _id: 'seats',
+                    key: 'seats',
+                    type: 'number',
+                    iDtype: 'integer',
+                    minValue: 0,
+                    lbl: { en: 'Seats' },
+                }
+                const layer: Preset = {
+                    ...seats,
+                    _id: 'layer',
+                    key: 'layer',
+                    minValue: undefined,
+                }
+                const inputMode = (preset: Preset) =>
+                    (
+                        render(preset, {
+                            key: preset.key ?? '',
+                            value: '',
+                        }).nativeElement.querySelector(
+                            'input'
+                        ) as HTMLInputElement
+                    ).getAttribute('inputmode')
+
+                expect(inputMode(seats)).toBe('numeric')
+                expect(inputMode(layer)).toBe('decimal')
+            })
+
             it.each(['120 m', 'NE', '1;2'])(
                 'keeps the value %s that is not a number',
                 async (value) => {

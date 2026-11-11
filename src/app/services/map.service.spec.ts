@@ -287,6 +287,72 @@ describe('MapService lifecycle', () => {
         expect(secondMarker.addTo).toHaveBeenCalledOnce()
         expect(secondMarker.remove).toHaveBeenCalledOnce()
     })
+
+    it('skips the move line while the map has no style (WebGL context lost)', () => {
+        const service = Object.create(MapService.prototype) as MapService
+        service.map = {
+            getSource: vi.fn(() => {
+                throw new TypeError(
+                    "Cannot read properties of null (reading 'getSource')"
+                )
+            }),
+        } as unknown as MapLibreMap
+        setPrivate(service, 'mapCreated', true)
+        setPrivate(service, 'moveOrigin', [2, 48])
+        const drawMoveLine = (
+            service as unknown as {
+                drawMoveLine: (target: [number, number]) => void
+            }
+        ).drawMoveLine.bind(service)
+
+        expect(() => drawMoveLine([2.001, 48.001])).not.toThrow()
+    })
+
+    it('joins the original position to the move marker, then clears the line', () => {
+        const service = Object.create(MapService.prototype) as MapService
+        const setData = vi.fn()
+        const getSource = vi.fn(() => ({ setData }))
+        service.map = { getSource } as unknown as MapLibreMap
+        setPrivate(service, 'mapCreated', true)
+        setPrivate(service, 'markerMovingState', { set: vi.fn() })
+        setPrivate(service, 'markerMoveMovingState', { set: vi.fn() })
+        setPrivate(service, 'moveOrigin', [2, 48])
+        const drawMoveLine = (
+            service as unknown as {
+                drawMoveLine: (target: [number, number]) => void
+            }
+        ).drawMoveLine.bind(service)
+
+        drawMoveLine([2.001, 48.001])
+
+        expect(getSource).toHaveBeenCalledWith('move_line')
+        expect(setData).toHaveBeenLastCalledWith({
+            type: 'FeatureCollection',
+            features: [
+                expect.objectContaining({
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [
+                            [2, 48],
+                            [2.001, 48.001],
+                        ],
+                    },
+                }),
+                expect.objectContaining({
+                    geometry: { type: 'Point', coordinates: [2, 48] },
+                }),
+            ],
+        })
+
+        service.cancelNewMarker()
+
+        expect(setData).toHaveBeenLastCalledWith({
+            type: 'FeatureCollection',
+            features: [],
+        })
+        drawMoveLine([3, 49])
+        expect(setData).toHaveBeenCalledTimes(2)
+    })
 })
 
 describe('MapService filters', () => {
@@ -876,6 +942,7 @@ describe('MapService with a stubbed MapLibre map', () => {
             }
         >()
         const layerIds: string[] = []
+        let bearing = 0
         const map = {
             addControl: vi.fn(),
             addLayer: vi.fn((layer: { id: string }) => {
@@ -888,8 +955,9 @@ describe('MapService with a stubbed MapLibre map', () => {
                 })
             }),
             fitBounds: vi.fn(),
+            easeTo: vi.fn(),
             flyTo: vi.fn(),
-            getBearing: () => 0,
+            getBearing: vi.fn(() => bearing),
             getCenter: () => ({ lng: 2, lat: 48 }),
             getContainer: () => ({ clientHeight: 800, clientWidth: 400 }),
             getFilter: () => ['all'],
@@ -900,7 +968,11 @@ describe('MapService with a stubbed MapLibre map', () => {
             hasControl: () => true,
             hasImage: () => true,
             isMoving: vi.fn(() => false),
-            jumpTo: vi.fn(),
+            jumpTo: vi.fn(
+                (camera: { bearing?: number }, _eventData?: unknown) => {
+                    if (camera.bearing !== undefined) bearing = camera.bearing
+                }
+            ),
             off: vi.fn(),
             on: vi.fn((name: string, handler: Handler) => {
                 handlers.set(name, [...(handlers.get(name) ?? []), handler])
@@ -974,7 +1046,22 @@ describe('MapService with a stubbed MapLibre map', () => {
             currentNavigation: () => null,
             navigate: vi.fn(() => Promise.resolve(true)),
         }
-        const windowStub = new EventTarget()
+        const animationFrames: Array<(time: number) => void> = []
+        const windowStub = Object.assign(new EventTarget(), {
+            requestAnimationFrame: (callback: (time: number) => void) =>
+                animationFrames.push(callback),
+            cancelAnimationFrame: (handle: number) => {
+                animationFrames[handle - 1] = () => undefined
+            },
+        })
+        let frameTime = 0
+        /** Runs the display frames requested by the compass animation. */
+        const runAnimationFrames = (max = 200) => {
+            for (let i = 0; i < max && animationFrames.length > 0; i++) {
+                frameTime += 16
+                animationFrames.shift()?.(frameTime)
+            }
+        }
         const documentStub = {
             addEventListener: vi.fn(),
             baseURI: 'http://localhost/',
@@ -1060,6 +1147,7 @@ describe('MapService with a stubbed MapLibre map', () => {
             router,
             service,
             windowStub,
+            runAnimationFrames,
         }
     }
 
@@ -1651,6 +1739,35 @@ describe('MapService with a stubbed MapLibre map', () => {
                     setLngLat: vi.fn(),
                 })
 
+        it('keeps north up after the compass until the GPS button is used', () => {
+            const { boot, compassHeading, fix, map, newLocation$, service } =
+                createHarness()
+            boot()
+            compassHeading.trueHeading = 90
+
+            service.centerOnMyPosition(true)
+            service.resetNorth()
+            vi.mocked(service.locationService.location).mockReturnValue(
+                located as GeolocationPosition
+            )
+            newLocation$.next(fix())
+
+            expect(map.easeTo).toHaveBeenCalledWith(
+                expect.objectContaining({ bearing: 0 })
+            )
+            expect(map.flyTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 0 })
+            )
+            expect(service.headingIsLocked).toBe(false)
+
+            service.centerOnMyPosition()
+
+            expect(service.headingIsLocked).toBe(true)
+            expect(map.flyTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 90 })
+            )
+        })
+
         it('forgets the wait for a fix once the user moves the map', () => {
             const { boot, emit, fix, map, newLocation$, service } =
                 createHarness()
@@ -1847,7 +1964,7 @@ describe('MapService with a stubbed MapLibre map', () => {
             )
         })
 
-        it('turns the map with the locked heading in the same camera move', () => {
+        it('leaves the bearing to the compass animation when it follows a fix', () => {
             const { boot, compassHeadingChanges$, fix, map, newLocation$ } =
                 createHarness()
             vi.useFakeTimers()
@@ -1864,7 +1981,7 @@ describe('MapService with a stubbed MapLibre map', () => {
 
             expect(map.jumpTo).toHaveBeenCalledOnce()
             expect(map.jumpTo).toHaveBeenCalledWith(
-                { center: [2.35, 48.85], zoom: 19, bearing: 80 },
+                { center: [2.35, 48.85], zoom: 19 },
                 expect.anything()
             )
         })
@@ -1931,35 +2048,22 @@ describe('MapService with a stubbed MapLibre map', () => {
             trueHeading,
         })
 
-        it('ignores heading changes below the threshold', () => {
-            vi.useFakeTimers()
-            const { boot, compassHeadingChanges$, map } = createHarness()
+        it('turns the map smoothly toward the compass heading', () => {
+            const { boot, compassHeadingChanges$, map, runAnimationFrames } =
+                createHarness()
             boot()
 
             compassHeadingChanges$.next(heading(100))
-            vi.advanceTimersByTime(150)
-            compassHeadingChanges$.next(heading(101.5))
-            vi.advanceTimersByTime(150)
-            compassHeadingChanges$.next(heading(104))
-            vi.advanceTimersByTime(150)
+            runAnimationFrames()
 
-            expect(map.jumpTo.mock.calls.map(([camera]) => camera)).toEqual([
-                { bearing: 100 },
-                { bearing: 104 },
-            ])
-        })
-
-        it('measures the heading change across north', () => {
-            vi.useFakeTimers()
-            const { boot, compassHeadingChanges$, map } = createHarness()
-            boot()
-
-            compassHeadingChanges$.next(heading(359))
-            vi.advanceTimersByTime(150)
-            compassHeadingChanges$.next(heading(1))
-            vi.advanceTimersByTime(150)
-
-            expect(map.jumpTo).toHaveBeenCalledTimes(1)
+            const bearings = map.jumpTo.mock.calls
+                .map(([camera]) => (camera as { bearing?: number }).bearing)
+                .filter((value) => value !== undefined)
+            expect(bearings.length).toBeGreaterThan(10)
+            expect(bearings.at(-1)).toBeCloseTo(100, 0)
+            for (const [, eventData] of map.jumpTo.mock.calls) {
+                expect(eventData).toEqual({ osmgoFollow: true })
+            }
         })
 
         it('does not interrupt the center button animation', () => {

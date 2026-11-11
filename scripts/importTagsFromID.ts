@@ -477,7 +477,9 @@ for (const fiDId of idTagFieldIds) {
         currentIDPreset['iDtype'] = currentIDPreset.type
         currentIDPreset['type'] = currentIDPreset.type
     } else if (
-        ['number', 'maxspeed', 'roadheight'].includes(currentIDPreset.type)
+        ['number', 'integer', 'maxspeed', 'roadheight'].includes(
+            currentIDPreset.type
+        )
     ) {
         currentIDPreset['iDtype'] = currentIDPreset.type
         currentIDPreset['type'] = 'number'

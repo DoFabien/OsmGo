@@ -3,10 +3,12 @@ import {
     type AfterViewInit,
     Component,
     computed,
+    effect,
     InjectionToken,
     inject,
     type OnDestroy,
     signal,
+    untracked,
 } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop'
 import { FormsModule } from '@angular/forms'
@@ -33,6 +35,11 @@ import { ConfigService } from '@services/config.service'
 import { DataService } from '@services/data.service'
 import { MapService } from '@services/map.service'
 import { OsmAuthService } from '@services/osm-auth.service'
+import type {
+    RebaseChoice,
+    RebaseOutcome,
+    RebaseResolution,
+} from '@services/osm-rebase'
 import { OverlayNavigationService } from '@services/overlay-navigation.service'
 import { TagsService } from '@services/tags.service'
 import {
@@ -191,15 +198,56 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     /** The recovery data was handed to the user: removing the attempt is safe. */
     readonly recoveryExported = signal(false)
     readonly rebasing = signal(false)
-    readonly rebaseConflict = signal<
-        { keys: string[]; position: boolean; structure: boolean } | undefined
-    >(undefined)
-    readonly canRebase = computed(() => {
+    /** A pending edit that lost a version conflict, compared with OSM. */
+    readonly isConflictReview = computed(() => {
         const error = this.error()
-        const feature = error?.feature
         return (
             error?.code === 'versionConflict' &&
-            feature?.properties.changeType === 'Update'
+            error.feature?.properties.changeType === 'Update'
+        )
+    })
+    /** The comparison with the current OpenStreetMap version. */
+    readonly conflictReview = signal<
+        | { featureId: string; outcome?: RebaseOutcome; failed?: boolean }
+        | undefined
+    >(undefined)
+    readonly conflictChoices = signal<RebaseResolution>({})
+    readonly conflictRows = computed(() => {
+        const outcome = this.conflictReview()?.outcome
+        return outcome?.kind === 'rebased' || outcome?.kind === 'conflict'
+            ? outcome.differences
+            : []
+    })
+    readonly positionConflict = computed(() => {
+        const outcome = this.conflictReview()?.outcome
+        return outcome?.kind === 'conflict' && outcome.position
+    })
+    /** Nodes or members changed on OSM: only dropping the edit is offered. */
+    readonly structureConflict = computed(() => {
+        const outcome = this.conflictReview()?.outcome
+        return outcome?.kind === 'conflict' && outcome.structure
+    })
+    readonly hasConflicts = computed(() => {
+        const outcome = this.conflictReview()?.outcome
+        return (
+            outcome?.kind === 'conflict' &&
+            (outcome.conflicts.length > 0 || outcome.position)
+        )
+    })
+    /** Re-applying is only offered when it can succeed. */
+    readonly canRebase = computed(() => {
+        if (!this.isConflictReview()) return false
+        const review = this.conflictReview()
+        if (!review?.outcome) return review?.failed === true
+        const outcome = review.outcome
+        if (outcome.kind === 'rebased' || outcome.kind === 'upToDate') {
+            return true
+        }
+        if (outcome.kind !== 'conflict' || outcome.structure) return false
+        const choices = this.conflictChoices()
+        return (
+            outcome.conflicts.every(({ key }) => choices.tags?.[key]) &&
+            (!outcome.position || choices.position !== undefined)
         )
     })
     /**
@@ -266,6 +314,20 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         this.persistComment()
     }
 
+    constructor() {
+        // A version conflict is compared with OSM as soon as it is shown.
+        effect(() => {
+            const error = this.error()
+            if (!this.isConflictReview() || !error?.feature) return
+            const featureId = String(error.feature.id)
+            untracked(() => {
+                if (this.conflictReview()?.featureId !== featureId) {
+                    void this.reviewConflict(featureId)
+                }
+            })
+        })
+    }
+
     ngAfterViewInit(): void {
         void this.verifyAfterRestart()
         void this.loadStateBackupCount()
@@ -329,7 +391,7 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     displayError(error: string): void {
         this.snackBar.open(error, this.translate.instant('SHARED.CLOSE'), {
             duration: 8000,
-            panelClass: 'osmgo-error-snackbar',
+            panelClass: ['osmgo-error-snackbar', 'osmgo-snackbar-above-footer'],
         })
     }
 
@@ -416,7 +478,7 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         if (this.uploadInFlight()) return
 
         this.localError.set(undefined)
-        this.rebaseConflict.set(undefined)
+        this.conflictReview.set(undefined)
         this.featureErrors.set({})
         this.failedFeatureId.set(undefined)
         this.uploadStatusVisible.set(true)
@@ -459,35 +521,101 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
     }
 
     async cancelErrorFeature(feature: OsmGoFeature): Promise<void> {
+        const id = String(feature.id)
         try {
-            await this.dataService.cancelPendingChange(String(feature.id))
+            // After a version conflict, the current OSM version is shown
+            // instead of the outdated one the change started from. This also
+            // holds for a deletion: restoring the outdated version would make
+            // every new attempt on the object conflict again.
+            // An object deleted on OpenStreetMap (410) goes the same way: the
+            // check against OSM finds it gone and drops it instead of
+            // restoring the outdated version.
+            const error = this.error()
+            if (
+                (error?.code === 'versionConflict' || error?.status === 410) &&
+                String(error.feature?.id) === id
+            ) {
+                await this.uploadCoordinator.discardConflictedChange(id)
+            } else {
+                await this.dataService.cancelPendingChange(id)
+            }
         } catch (error) {
             this.setLocalError(error, feature)
             return
         }
         this.refreshMapAndQueue()
         this.localError.set(undefined)
-        this.rebaseConflict.set(undefined)
+        this.conflictReview.set(undefined)
+        this.clearFeatureError(id)
         this.uploadCoordinator.resetTerminalState()
+    }
+
+    chooseTag(key: string, choice: RebaseChoice): void {
+        this.conflictChoices.update((choices) => ({
+            ...choices,
+            tags: { ...choices.tags, [key]: choice },
+        }))
+    }
+
+    choosePosition(choice: RebaseChoice): void {
+        this.conflictChoices.update((choices) => ({
+            ...choices,
+            position: choice,
+        }))
+    }
+
+    /** Compares the conflicting edit with the current OpenStreetMap version. */
+    async reviewConflict(featureId: string): Promise<void> {
+        this.conflictReview.set({ featureId })
+        this.conflictChoices.set({})
+        let review: {
+            featureId: string
+            outcome?: RebaseOutcome
+            failed?: boolean
+        }
+        try {
+            review = {
+                featureId,
+                outcome: await this.uploadCoordinator.previewRebase(featureId),
+            }
+        } catch (error) {
+            console.error(
+                'The current OSM version could not be fetched.',
+                error
+            )
+            review = { featureId, failed: true }
+        }
+        if (this.conflictReview()?.featureId !== featureId) return
+        this.conflictReview.set(review)
+        // The choices and actions come first: the card may be taller than
+        // the room left above the footer.
+        setTimeout(() =>
+            this.document
+                .querySelector('[data-testid="upload-error"]')
+                ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        )
     }
 
     /**
      * Re-applies a change that lost a version conflict on top of the current
-     * OpenStreetMap version. Overlapping edits are reported, never merged.
+     * OpenStreetMap version, with the values chosen for overlapping tags.
      */
     async rebaseErrorFeature(feature: OsmGoFeature): Promise<void> {
         if (this.rebasing()) return
         this.rebasing.set(true)
-        this.rebaseConflict.set(undefined)
+        const id = String(feature.id)
         try {
             const outcome = await this.uploadCoordinator.rebasePendingFeature(
-                String(feature.id)
+                id,
+                this.conflictChoices()
             )
             switch (outcome.kind) {
                 case 'rebased':
                 case 'upToDate':
                     this.refreshMapAndQueue()
                     this.localError.set(undefined)
+                    this.conflictReview.set(undefined)
+                    this.clearFeatureError(id)
                     this.uploadCoordinator.resetTerminalState()
                     this.notify(
                         outcome.kind === 'rebased'
@@ -499,11 +627,9 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
                     this.notify('SEND_DATA.REBASE_GONE')
                     break
                 case 'conflict':
-                    this.rebaseConflict.set({
-                        keys: outcome.conflicts.map(({ key }) => key),
-                        position: outcome.position,
-                        structure: outcome.structure,
-                    })
+                    // OpenStreetMap changed again meanwhile: the new overlaps
+                    // are shown, the choices already made still apply.
+                    this.conflictReview.set({ featureId: id, outcome })
                     break
                 default:
                     this.notify('SEND_DATA.REBASE_FAILED')
@@ -813,11 +939,20 @@ export class PushDataToOsmPage implements AfterViewInit, OnDestroy {
         this.failedFeatureId.set(featureId)
     }
 
+    private clearFeatureError(featureId: string): void {
+        this.featureErrors.update(
+            ({ [featureId]: _cleared, ...errors }) => errors
+        )
+        if (this.failedFeatureId() === featureId) {
+            this.failedFeatureId.set(undefined)
+        }
+    }
+
     private notify(messageKey: string): void {
         this.snackBar.open(
             this.translate.instant(messageKey),
             this.translate.instant('SHARED.CLOSE'),
-            { duration: 6000 }
+            { duration: 6000, panelClass: 'osmgo-snackbar-above-footer' }
         )
     }
 

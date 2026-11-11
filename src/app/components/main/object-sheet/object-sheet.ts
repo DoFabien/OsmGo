@@ -14,10 +14,12 @@ import { MatDialog } from '@angular/material/dialog'
 import { MatIconModule } from '@angular/material/icon'
 import { MatSnackBar } from '@angular/material/snack-bar'
 import { MatTooltipModule } from '@angular/material/tooltip'
+import { buildingTagsWithoutPlace } from '@app/utils/building-place'
 import { cloneDeep } from '@app/utils/clone'
 import { resolveReplacementTags } from '@app/utils/deprecated-tags'
 import { isNodeUsedByWay } from '@app/utils/osm-feature'
 import { isSafeExternalUrl } from '@app/utils/safe-external-url'
+import { SURVEY_DATE_KEYS, surveyDateKeysToSet } from '@app/utils/survey-date'
 import { IconComponent } from '@components/icon/icon.component'
 import { AlertComponent } from '@components/modal/components/alert/alert.component'
 import { OpeningHoursComponent } from '@components/modal/components/opening-hours/opening-hours.component'
@@ -95,8 +97,6 @@ const SUMMARY_LABELS: Record<string, string> = {
 }
 
 const SUMMARY_ORDER = ['material', 'start_date', 'artist_name', 'description']
-
-const SURVEY_DATE_KEYS = ['survey:date', 'check_date']
 
 @Component({
     selector: 'app-object-sheet',
@@ -193,6 +193,17 @@ export class ObjectSheetComponent {
     })
 
     readonly feature = computed<OsmGoFeature>(() => this.selection().geojson)
+    /** The fix of a deprecated tag must leave a tag the editor supports. */
+    readonly canFixDeprecated = computed(() => {
+        const replace = (
+            this.selectedTagConfig() as { replace?: Record<string, unknown> }
+        ).replace
+        const primaryKeys = this.tagsService.primaryKeys()
+        return (
+            primaryKeys.length === 0 ||
+            Object.keys(replace ?? {}).some((key) => primaryKeys.includes(key))
+        )
+    })
     readonly selectedTagConfig = computed(() =>
         getConfigTag(this.feature(), this.tagsService.tags())
     )
@@ -330,9 +341,17 @@ export class ObjectSheetComponent {
               )
             : undefined
     })
+    /**
+     * An object waiting to be deleted: any edit saved on it would still be
+     * uploaded as a deletion, so the only action offered is to revert it.
+     */
+    readonly isPendingDeletion = computed(
+        () => this.feature().properties.changeType === 'Delete'
+    )
     readonly shouldShowSurveyCard = computed(() => {
         const display = this.configService.getDisplaySurveyCard()
         if (
+            this.isPendingDeletion() ||
             display === 'never' ||
             String(this.feature().properties.meta.timestamp) === '0'
         ) {
@@ -407,6 +426,7 @@ export class ObjectSheetComponent {
     }
 
     fixDeprecated(deprecated: DeprecatedTags): void {
+        if (this.isPendingDeletion()) return
         const feature = cloneDeep(this.feature())
         const replace = resolveReplacementTags(
             deprecated.replace,
@@ -424,24 +444,43 @@ export class ObjectSheetComponent {
 
     handleSurveyYes(): void {
         const feature = cloneDeep(this.feature())
-        const checkedKey = this.configService.config().checkedKey
         const today = this.generateISODate(new Date())
         const tags = feature.properties.tags
-        for (const key of SURVEY_DATE_KEYS) {
-            if (key === checkedKey || key in tags) tags[key] = today
+        for (const key of surveyDateKeysToSet(
+            Object.keys(tags),
+            this.configService.config().checkedKey
+        )) {
+            tags[key] = today
         }
         this.persistFeature(feature)
     }
 
+    // a building is not deleted with the bank it held: only the bank goes
+    readonly buildingTagsWithoutPlace = computed(() => {
+        const feature = this.feature()
+        return buildingTagsWithoutPlace(
+            feature.properties.type,
+            feature.properties.tags,
+            this.tagsService.findPkey(feature)?.key
+        )
+    })
+
     handleSurveyNo(): void {
-        if (this.feature().properties.type !== 'node') return
+        const feature = this.feature()
+        const buildingTags = this.buildingTagsWithoutPlace()
+        if (feature.properties.type !== 'node' && !buildingTags) return
         const data: ConfirmDialogData = {
             title: this.translate.instant(
                 'MODAL_SELECTED_ITEM.DELETE_CONFIRM_HEADER'
             ),
-            message: this.translate.instant(
-                'MODAL_SELECTED_ITEM.DELETE_CONFIRM_MESSAGE'
-            ),
+            message: buildingTags
+                ? this.translate.instant(
+                      'MODAL_SELECTED_ITEM.DELETE_KEEP_BUILDING_MESSAGE',
+                      { category: this.category() }
+                  )
+                : this.translate.instant(
+                      'MODAL_SELECTED_ITEM.DELETE_CONFIRM_MESSAGE'
+                  ),
             cancelLabel: this.translate.instant('SHARED.CANCEL'),
             confirmLabel: this.translate.instant('SHARED.CONFIRM'),
             destructive: true,
@@ -454,7 +493,18 @@ export class ObjectSheetComponent {
             })
             .afterClosed()
             .subscribe((confirmed) => {
-                if (confirmed) this.deleteSelectedObject()
+                if (!confirmed) return
+                if (buildingTags) {
+                    const building = cloneDeep(feature)
+                    building.properties.tags = buildingTags
+                    building.properties.primaryTag = {
+                        key: 'building',
+                        value: buildingTags['building'],
+                    }
+                    this.persistFeature(building)
+                } else {
+                    this.deleteSelectedObject()
+                }
             })
     }
 

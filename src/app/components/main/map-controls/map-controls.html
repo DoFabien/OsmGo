@@ -17,6 +17,25 @@
     </button>
 </div>
 
+<div class="map-control map-control--compass">
+    <button
+        mat-icon-button
+        class="osmgo-map-button compass-button"
+        type="button"
+        data-testid="reset-north"
+        [matTooltip]="'MAIN.BUTTONS.RESET_NORTH' | translate"
+        [attr.aria-label]="'MAIN.BUTTONS.RESET_NORTH' | translate"
+        (click)="mapService.resetNorth()"
+    >
+        <mat-icon
+            fontSet="material-symbols-rounded"
+            aria-hidden="true"
+            [style.transform]="'rotate(' + -mapService.bearing() + 'deg)'"
+            >navigation</mat-icon
+        >
+    </button>
+</div>
+
 @if ((dataService.changedFeatureCount() > 0 ||
 initService.uploadNeedsAttention()) && !mapService.markerMoving()) {
 <div class="map-control map-control--pending">
@@ -135,53 +154,42 @@ initService.uploadNeedsAttention()) && !mapService.markerMoving()) {
 } @if (mapService.markerMoving() || mapService.markerMoveMoving()) {
 <div class="map-action-dock map-action-dock--confirm">
     <button
-        mat-icon-button
-        class="dock-button dock-button--cancel"
+        mat-stroked-button
+        class="placement-button placement-button--cancel"
         type="button"
         [attr.data-testid]="
-                mapService.markerMoveMoving() ? 'cancel-marker-move' : null
-            "
-        [matTooltip]="'SHARED.CANCEL' | translate"
-        [attr.aria-label]="'SHARED.CANCEL' | translate"
+            mapService.markerMoveMoving() ? 'cancel-marker-move' : null
+        "
         (click)="
-                mapService.markerMoveMoving()
-                    ? mapService.cancelNewPosition()
-                    : mapService.cancelNewMarker()
-            "
+            mapService.markerMoveMoving()
+                ? mapService.cancelNewPosition()
+                : mapService.cancelNewMarker()
+        "
     >
         <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
             >close</mat-icon
         >
+        {{ 'SHARED.CANCEL' | translate }}
     </button>
 
     <button
-        mat-fab
-        class="confirm-button"
+        mat-flat-button
+        class="placement-button placement-button--confirm"
         type="button"
         [attr.data-testid]="
-                mapService.markerMoveMoving() ? 'confirm-marker-move' : null
-            "
-        [matTooltip]="
-                (mapService.markerMoveMoving()
-                    ? 'MAIN.BUTTONS.CONFIRM_MOVE'
-                    : 'MAIN.BUTTONS.CONFIRM_ADD'
-                ) | translate
-            "
-        [attr.aria-label]="
-                (mapService.markerMoveMoving()
-                    ? 'MAIN.BUTTONS.CONFIRM_MOVE'
-                    : 'MAIN.BUTTONS.CONFIRM_ADD'
-                ) | translate
-            "
+            mapService.markerMoveMoving() ? 'confirm-marker-move' : 'confirm-add'
+        "
         (click)="
-                mapService.markerMoveMoving()
-                    ? mapService.openModalWithNewPosition()
-                    : mapService.openModalOsm()
-            "
+            mapService.markerMoveMoving()
+                ? mapService.openModalWithNewPosition()
+                : mapService.openModalOsm()
+        "
     >
         <mat-icon fontSet="material-symbols-rounded" aria-hidden="true"
             >check</mat-icon
         >
+        {{ (mapService.markerMoveMoving() ? 'MAIN.BUTTONS.MOVE_HERE' :
+        'MAIN.BUTTONS.PLACE_HERE' ) | translate }}
     </button>
 </div>
 }

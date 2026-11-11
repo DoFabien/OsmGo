@@ -47,7 +47,11 @@
                     >{{ configService.userInfo().display_name || 'OpenStreetMap'
                     }}</strong
                 >
-                <span>OpenStreetMap</span>
+                <span
+                    >{{ configService.config().isDevServer ?
+                    ('SEND_DATA.DEVELOPMENT_SERVER' | translate) :
+                    'OpenStreetMap' }}</span
+                >
             </div>
         </section>
         }

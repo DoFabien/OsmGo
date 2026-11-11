@@ -159,12 +159,14 @@ describe('SemiComboComponent', () => {
         expect(values(changes)).toEqual(['pizza'])
     })
 
-    it('suggests the first values while the field is empty only', () => {
+    it('keeps suggesting the values not chosen yet', () => {
         const empty = render({ key: 'cuisine', value: '' })
         expect(empty.fixture.componentInstance.suggestions()).toHaveLength(3)
 
         const filled = render({ key: 'cuisine', value: 'pizza' })
-        expect(filled.fixture.componentInstance.suggestions()).toEqual([])
+        expect(
+            filled.fixture.componentInstance.suggestions().map((o) => o.v)
+        ).toEqual(['italian', 'burger'])
     })
 
     it('edits the raw value in code mode', () => {

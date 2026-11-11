@@ -3,7 +3,7 @@
         <section class="notice notice--error" role="alert">
             <mat-icon fontSet="material-symbols-rounded">warning</mat-icon>
             <p>{{ 'ALERT.TAG_IS_DEPRECATED' | translate }}</p>
-            @if (config.replace) {
+            @if (config.replace && canFix()) {
                 <button
                     mat-stroked-button
                     type="button"

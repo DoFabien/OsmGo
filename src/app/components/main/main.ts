@@ -123,6 +123,12 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     readonly overlaySize = signal<OverlaySize>('standard')
     readonly selectedFeature = signal<EventShowModal | null>(null)
     private readonly readBeforeEdit = signal<EventShowModal | null>(null)
+    /** What the editor must find again once the marker move ends. */
+    private moveDraft: {
+        id: OsmGoFeature['id']
+        baselineTags?: Record<string, string>
+        moved: boolean
+    } | null = null
     readonly displayedSelection = computed(() =>
         this.mapService.markerMoveMoving() ? null : this.selectedFeature()
     )
@@ -360,7 +366,20 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 if (!this.isCurrentStackedFeature(_data)) {
                     this.stackedFeatures.set(null)
                 }
-                this.selectedFeature.set(_data)
+                const moveDraft = this.moveDraft
+                this.moveDraft = null
+                this.selectedFeature.set(
+                    moveDraft &&
+                        moveDraft.id === _data.geojson.id &&
+                        (_data.type === 'Update' || _data.type === 'Create')
+                        ? {
+                              ..._data,
+                              baselineTags: moveDraft.baselineTags,
+                              newPosition:
+                                  Boolean(_data.newPosition) || moveDraft.moved,
+                          }
+                        : _data
+                )
                 if (!browsingStack) {
                     this.sheetLevel.set(
                         _data.type === 'Read' && !_data.newPosition
@@ -672,6 +691,7 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
     }
 
     closeSelection(): void {
+        this.moveDraft = null
         this.selectedFeature.set(null)
         this.readBeforeEdit.set(null)
         this.stackedFeatures.set(null)
@@ -692,6 +712,11 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 ...selection,
                 type: 'Update',
                 geojson: replacementFeature ?? selection.geojson,
+                // The replacement is a draft: the tags to compare against are
+                // the ones the object still has.
+                baselineTags: replacementFeature
+                    ? { ...selection.geojson.properties.tags }
+                    : undefined,
             })
             this.sheetLevel.set('expanded')
         }
@@ -781,6 +806,11 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
                 geojson: data.geojson,
                 newPosition: false,
             })
+            this.moveDraft = {
+                id: data.geojson.id,
+                baselineTags: data.baselineTags,
+                moved: Boolean(data.moved),
+            }
             this.mapService.moveElement(data)
             return
         }
@@ -940,10 +970,23 @@ export class MainPage implements AfterViewInit, OnDestroy, OnInit {
             .subscribe(() => {
                 this.mapReady = true
                 if (this.addOsmObjectOnStart) {
-                    this.mapService.openModalOsm(
-                        this.addOsmObjectOnStart.coords,
-                        this.addOsmObjectOnStart.tags
-                    )
+                    const { coords, tags } = this.addOsmObjectOnStart
+                    // The editor cannot open tags without a primary key: it
+                    // would stay on its loading screen.
+                    if (
+                        this.tagsService.findPkey(
+                            Object.entries(tags).map(([key, value]) => ({
+                                key,
+                                value,
+                            }))
+                        )
+                    ) {
+                        this.mapService.openModalOsm(coords, tags)
+                    } else {
+                        console.error(
+                            'The add query parameter needs a primary key such as amenity or shop.'
+                        )
+                    }
                 }
 
                 const lateLinkedObject = this.lateLinkedObject

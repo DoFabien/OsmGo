@@ -16,6 +16,7 @@ describe('MapControlsComponent', () => {
     const currentZoom = signal(18)
     const gpsIsReady = signal(false)
     const uploadNeedsAttention = signal(false)
+    const bearing = signal(0)
     const geolocationIssue = signal<
         'denied' | 'unavailable' | 'timeout' | null
     >(null)
@@ -56,6 +57,8 @@ describe('MapControlsComponent', () => {
                 {
                     provide: MapService,
                     useValue: {
+                        bearing,
+                        resetNorth: vi.fn(),
                         centerOnMyPosition: vi.fn(),
                         displaySatelliteBaseMap: vi.fn(),
                         isDisplaySatelliteBaseMap: () => false,
@@ -303,5 +306,26 @@ describe('MapControlsComponent', () => {
         const upload = element.querySelector('[data-testid="open-upload"]')
         expect(upload).not.toBeNull()
         expect(upload?.textContent).toContain('!')
+    })
+
+    it('always shows a compass pointing north that puts north up', () => {
+        bearing.set(0)
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.detectChanges()
+        const compass = (fixture.nativeElement as HTMLElement).querySelector(
+            '[data-testid="reset-north"]'
+        ) as HTMLButtonElement
+        const rotation = () =>
+            compass.querySelector('mat-icon')?.getAttribute('style')
+
+        expect(compass).not.toBeNull()
+        expect(rotation()).toContain('rotate(0deg)')
+
+        bearing.set(-170)
+        fixture.detectChanges()
+        expect(rotation()).toContain('rotate(170deg)')
+
+        compass.click()
+        expect(TestBed.inject(MapService).resetNorth).toHaveBeenCalledOnce()
     })
 })

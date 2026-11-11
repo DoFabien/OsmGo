@@ -3,10 +3,6 @@
 	"appName": "Osm Go!",
 	"webDir": "www",
 	"plugins": {
-		"App": {
-			"url": "osmgo",
-			"androidScheme": "osmgo"
-		},
 		"SystemBars": {
 			"insetsHandling": "css",
 			"style": "DEFAULT",

@@ -3,17 +3,39 @@
 ### Added
 
 - Introduce the mobile-first OsmGo V2 interface based on Angular Material and Capacitor.
-- Unify object reading, creation, and editing in a responsive map sheet.
+- Unify object reading, creation, and editing in a responsive map sheet, with an optional preview mode and a dark theme.
+- Edit multi-value fields (payment methods, cuisine, sports…) with dedicated controls.
+- Browse objects stacked at the same place with previous/next buttons.
+- Review a version conflict against the current OpenStreetMap version before sending again.
+- Recover an interrupted upload: the attempt is checked against OpenStreetMap, and pending edits can be exported.
+- Sign in from the upload screen; each server (production, development) keeps its own session and changeset comment.
+- Link the privacy policy and the open-source licences from the About screen.
 
 ### Changed
 
 - Replace the main Ionic workflows with Angular Material and custom OsmGo components.
 - Keep settings, upload, tag management, and about screens over the persistent map.
 - Modernize map controls, object metadata, SVG icons, gestures, and responsive layouts.
+- Use OpenFreeMap for the vector background instead of Mapbox.
+- Sign in with OAuth 2 PKCE in the same tab, with fewer permissions (`read_prefs`, `write_api`); signing out revokes the token.
+- Downloading an area no longer overwrites pending edits.
+- Deleting a point of interest mapped on a building keeps the building.
+- Update the categories and fields from the iD tagging schema (1556 categories) and load brand suggestions on demand.
+- Check dates use `check_date` by default; an object keeps the key it already has (`survey:date` or `check_date`).
+- "Delete cache" and the development server switch ask for confirmation and list the pending edits.
+- Translate the interface with an AI model from context notes, instead of POEditor.
+- Android: require Android 7.0 (API 24), target API 36, and disable automatic device backup.
+
+### Removed
+
+- Background imagery is limited to aerial photos; map-style layers (cadastre, topographic maps, OSM renderings, quality-assurance layers) are no longer offered.
+- Remembered fields can be pasted on a new object only, no longer on an existing one.
+- The exact date of the last edit and the "last survey" line are no longer shown in the object details.
 
 ### Fixed
 
 - Make OAuth callbacks and token persistence reliable on web and Android.
+- Keep pending edits through a failed or interrupted upload, and never send an object twice without confirmation.
 
 # 1.7.0
 

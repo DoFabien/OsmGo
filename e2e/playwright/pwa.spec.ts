@@ -488,7 +488,7 @@ test.describe('wide desktop category picker', () => {
         await openApp(page)
         await page.getByTestId('add-poi').click()
         await page
-            .getByRole('button', { name: 'Add an object', exact: true })
+            .getByRole('button', { name: 'Place here', exact: true })
             .click()
 
         const sheet = page.getByTestId('selected-object-sheet')
@@ -729,9 +729,7 @@ test('creates, edits, and persists a POI locally', async ({ page }) => {
 
     await expect(page.getByTestId('selected-object-sheet')).toHaveCount(0)
     await page.getByTestId('add-poi').click()
-    await page
-        .getByRole('button', { name: 'Add an object', exact: true })
-        .click()
+    await page.getByRole('button', { name: 'Place here', exact: true }).click()
     const lastBench = page
         .locator('.tag-row')
         .filter({ hasText: 'amenity=bench' })
@@ -932,6 +930,7 @@ test('cancels and confirms moving an existing POI', async ({ page }) => {
 
     await expect(page.getByTestId('edit-selected-poi')).toBeVisible()
     await page.getByTestId('edit-selected-poi').click()
+    await page.getByPlaceholder('Name').fill('Renamed bench')
     await page.getByTestId('move-poi').click()
 
     await expect(page.getByTestId('add-poi')).toHaveCount(0)
@@ -942,6 +941,9 @@ test('cancels and confirms moving an existing POI', async ({ page }) => {
     await panMap(page, 'ArrowRight')
     await page.getByTestId('cancel-marker-move').click()
     await expect(page.getByTestId('move-poi')).toBeVisible()
+    // the edit made before the move is still a change to save
+    await expect(page.getByPlaceholder('Name')).toHaveValue('Renamed bench')
+    await expect(page.getByTestId('save-poi')).toContainText('Save')
 
     const stateAfterCancel = await readStoredValue<StoredOsmState>(
         page,
@@ -970,6 +972,9 @@ test('cancels and confirms moving an existing POI', async ({ page }) => {
         })
         .toBe(true)
     const savedState = await readStoredValue<StoredOsmState>(page, 'osmState')
+    expect(savedState.pendingById['node/1']?.properties.tags.name).toBe(
+        'Renamed bench'
+    )
     const savedCoordinates =
         savedState.pendingById['node/1']?.geometry.coordinates
     expect(savedCoordinates).toBeDefined()

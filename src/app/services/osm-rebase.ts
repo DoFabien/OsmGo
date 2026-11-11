@@ -8,8 +8,33 @@ import { normalizeOsmTags } from '@app/utils/osm-tags'
 import type { OsmGoFeature } from '@osmgo/type'
 import type { OsmApiObject } from '@services/osmApi.service'
 
+/** A tag whose local value differs from the current OpenStreetMap one. */
+export interface TagDifference {
+    key: string
+    mine?: string
+    theirs?: string
+    /**
+     * `local`: only changed locally, kept. `remote`: only changed on
+     * OpenStreetMap, taken. `conflict`: changed differently on both sides.
+     */
+    origin: 'local' | 'remote' | 'conflict'
+}
+
+export type RebaseChoice = 'mine' | 'theirs'
+
+/** The user's choice for each conflict, by tag key, and for the position. */
+export interface RebaseResolution {
+    tags?: Record<string, RebaseChoice>
+    position?: RebaseChoice
+}
+
 export type RebaseOutcome =
-    | { kind: 'rebased'; feature: OsmGoFeature; adoptedRemoteKeys: string[] }
+    | {
+          kind: 'rebased'
+          feature: OsmGoFeature
+          adoptedRemoteKeys: string[]
+          differences: TagDifference[]
+      }
     | { kind: 'upToDate' }
     | { kind: 'unsupported' }
     | { kind: 'gone' }
@@ -21,6 +46,7 @@ export type RebaseOutcome =
           position: boolean
           /** Nodes of the way or members of the relation changed remotely. */
           structure: boolean
+          differences: TagDifference[]
       }
 
 const sameList = (left: readonly string[], right: readonly string[]) =>
@@ -39,12 +65,14 @@ const memberKeys = (
  * changed remotely are left to the user, as their geometry is not available.
  *
  * `finalize` recomputes the derived display data (name, icon, marker) of a
- * feature whose tags changed.
+ * feature whose tags changed. `resolution` settles conflicts the user
+ * decided; the edit is rebased once none is left.
  */
 export const rebaseOnRemote = (
     pending: OsmGoFeature,
     remote: OsmApiObject,
-    finalize: (feature: OsmGoFeature) => OsmGoFeature
+    finalize: (feature: OsmGoFeature) => OsmGoFeature,
+    resolution: RebaseResolution = {}
 ): RebaseOutcome => {
     const base = pending.properties.originalData
     if (
@@ -60,11 +88,36 @@ export const rebaseOnRemote = (
     }
 
     const theirsTags = normalizeOsmTags(remote.tags ?? {})
+    const mineTags = normalizeOsmTags(pending.properties.tags)
     const merge = mergeOsmTags(
         normalizeOsmTags(base.properties.tags),
-        normalizeOsmTags(pending.properties.tags),
+        mineTags,
         theirsTags
     )
+    const conflictKeys = new Set(merge.conflicts.map(({ key }) => key))
+    const differences: TagDifference[] = [
+        ...new Set([...Object.keys(mineTags), ...Object.keys(theirsTags)]),
+    ]
+        .filter((key) => mineTags[key] !== theirsTags[key])
+        .sort()
+        .map((key) => ({
+            key,
+            mine: mineTags[key],
+            theirs: theirsTags[key],
+            origin: conflictKeys.has(key)
+                ? 'conflict'
+                : merge.adoptedRemoteKeys.includes(key)
+                  ? 'remote'
+                  : 'local',
+        }))
+    const unresolved = merge.conflicts.filter((conflict) => {
+        const choice = resolution.tags?.[conflict.key]
+        if (choice === 'theirs') {
+            if (conflict.theirs === undefined) delete merge.tags[conflict.key]
+            else merge.tags[conflict.key] = conflict.theirs
+        }
+        return choice === undefined
+    })
 
     let structure = false
     if (pending.properties.type === 'way') {
@@ -96,45 +149,27 @@ export const rebaseOnRemote = (
             pending.geometry.coordinates,
             [remoteLon, remoteLat]
         )
-        position = result.conflict
-        mergedPosition = result.position
+        position = result.conflict && resolution.position === undefined
+        mergedPosition =
+            result.conflict && resolution.position === 'theirs'
+                ? [remoteLon, remoteLat]
+                : result.position
     }
 
-    if (merge.conflicts.length > 0 || position || structure) {
+    if (unresolved.length > 0 || position || structure) {
         return {
             kind: 'conflict',
-            conflicts: merge.conflicts,
+            conflicts: unresolved,
             position,
             structure,
+            differences,
         }
     }
 
-    const meta = {
-        version: remote.version,
-        changeset: String(remote.changeset ?? ''),
-        timestamp: remote.timestamp ?? '',
-        user: remote.user ?? '',
-        uid: String(remote.uid ?? ''),
-    }
-
-    const newBase = cloneDeep(base)
-    newBase.properties.tags = theirsTags
-    newBase.properties.meta = { ...meta }
-    if (
-        newBase.geometry.type === 'Point' &&
-        pending.properties.type === 'node'
-    ) {
-        newBase.geometry = {
-            type: 'Point',
-            coordinates: [Number(remote.lon), Number(remote.lat)],
-        }
-    }
-    delete newBase.properties.originalData
-    delete newBase.properties.changeType
-
+    const newBase = remoteVersionOf(base, remote)
     const rebased = cloneDeep(pending)
     rebased.properties.tags = merge.tags
-    rebased.properties.meta = { ...meta }
+    rebased.properties.meta = { ...newBase.properties.meta }
     if (mergedPosition && rebased.geometry.type === 'Point') {
         rebased.geometry = { type: 'Point', coordinates: mergedPosition }
     }
@@ -144,5 +179,72 @@ export const rebaseOnRemote = (
         kind: 'rebased',
         feature: finalize(rebased),
         adoptedRemoteKeys: merge.adoptedRemoteKeys,
+        differences,
     }
+}
+
+const remoteMeta = (remote: OsmApiObject) => ({
+    version: remote.version ?? 0,
+    changeset: String(remote.changeset ?? ''),
+    timestamp: remote.timestamp ?? '',
+    user: remote.user ?? '',
+    uid: String(remote.uid ?? ''),
+})
+
+/** `base` updated to the current OpenStreetMap tags, version and node position. */
+const remoteVersionOf = (
+    base: OsmGoFeature,
+    remote: OsmApiObject
+): OsmGoFeature => {
+    const current = cloneDeep(base)
+    current.properties.tags = normalizeOsmTags(remote.tags ?? {})
+    current.properties.meta = remoteMeta(remote)
+    if (current.geometry.type === 'Point' && base.properties.type === 'node') {
+        current.geometry = {
+            type: 'Point',
+            coordinates: [Number(remote.lon), Number(remote.lat)],
+        }
+    }
+    delete current.properties.originalData
+    delete current.properties.changeType
+    return current
+}
+
+/**
+ * The current OpenStreetMap version of the object a pending edit started
+ * from, to show it again when the edit is dropped after a conflict. Undefined
+ * when it cannot be rebuilt locally: a way or relation whose nodes or members
+ * changed, a deleted object or an invalid answer.
+ */
+export const currentVersionOf = (
+    pending: OsmGoFeature,
+    remote: OsmApiObject,
+    finalize: (feature: OsmGoFeature) => OsmGoFeature
+): OsmGoFeature | undefined => {
+    const base = pending.properties.originalData
+    if (!base || remote.version === undefined || remote.visible === false) {
+        return undefined
+    }
+    if (
+        pending.properties.type === 'node' &&
+        (!Number.isFinite(Number(remote.lon)) ||
+            !Number.isFinite(Number(remote.lat)))
+    ) {
+        return undefined
+    }
+    if (
+        (pending.properties.type === 'way' &&
+            !sameList(
+                (remote.nodes ?? []).map(String),
+                (base.ndRefs ?? []).map(String)
+            )) ||
+        (pending.properties.type === 'relation' &&
+            !sameList(
+                memberKeys(remote.members ?? []),
+                memberKeys(base.members ?? [])
+            ))
+    ) {
+        return undefined
+    }
+    return finalize(remoteVersionOf(base, remote))
 }

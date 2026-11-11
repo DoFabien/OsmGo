@@ -924,7 +924,19 @@ export class DataService {
         )
     }
 
-    cancelPendingChange(id: string): Promise<void> {
+    /**
+     * Drops a local change. `current`, the version now on OpenStreetMap,
+     * replaces the one the change started from when it is known (after a
+     * version conflict).
+     */
+    cancelPendingChange(id: string, current?: OsmGoFeature): Promise<void> {
+        const replacement = current
+            ? requireOsmGoFeature(
+                  cloneDeep(current),
+                  'current OSM version',
+                  'official'
+              )
+            : undefined
         return this.enqueueOsmStateMutation(
             'cancel pending change',
             (state) => {
@@ -934,13 +946,33 @@ export class DataService {
                     throw new Error('The pending feature data is missing.')
                 }
                 if (pending.properties.changeType !== 'Create') {
-                    const original = this.requireOriginalFeature(pending)
-                    state.officialById[id] = original
+                    const official =
+                        replacement ?? this.requireOriginalFeature(pending)
+                    if (replacement)
+                        this.copyCanonicalIdentity(official, pending)
+                    state.officialById[id] = official
                     this.keptOnNextDownloadIds.add(id)
                 }
                 delete state.pendingById[id]
             }
         )
+    }
+
+    /**
+     * Drops a pending change on an object OpenStreetMap reports as deleted
+     * (HTTP 410): restoring the outdated version would show an object that no
+     * longer exists, and keep it through the next download.
+     */
+    discardGoneFeature(id: string): Promise<void> {
+        return this.enqueueOsmStateMutation('discard gone feature', (state) => {
+            this.assertUploadQueueUnlocked(state, [id])
+            if (!state.pendingById[id]) {
+                throw new Error('The pending feature data is missing.')
+            }
+            delete state.pendingById[id]
+            delete state.officialById[id]
+            this.keptOnNextDownloadIds.delete(id)
+        })
     }
 
     cancelAllPendingChanges(): Promise<void> {

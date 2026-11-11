@@ -796,7 +796,7 @@ describe('UploadCoordinator', () => {
         })
         await harness.coordinator.recoverJournal()
         harness.dependencies.now.mockReturnValue(
-            new Date('2026-08-02T10:00:30.000Z')
+            new Date('2026-08-02T10:03:00.000Z')
         )
         await harness.coordinator.verifyPreparedAttempt()
 
@@ -1491,7 +1491,7 @@ describe('UploadCoordinator', () => {
                 ).toHaveBeenCalledWith('attempt-1')
             })
 
-            it('counts the delay from the start of an attempt left by a previous session', async () => {
+            it('counts the delay from the upload timeout of an attempt left by a previous session', async () => {
                 const feature = queuedFeature('Create', -1)
                 const harness = createHarness({
                     features: [feature],
@@ -1500,13 +1500,23 @@ describe('UploadCoordinator', () => {
                 })
                 await harness.coordinator.recoverJournal()
 
+                // started at 09:59:00: the request may have been in flight
+                // until 10:01:30, and the check waits 90 s more
                 const early = await harness.coordinator.verifyPreparedAttempt()
-                harness.dependencies.now.mockReturnValue(at('10:00:30'))
+                harness.dependencies.now.mockReturnValue(at('10:02:59'))
+                const stillEarly =
+                    await harness.coordinator.verifyPreparedAttempt()
+                harness.dependencies.now.mockReturnValue(at('10:03:00'))
                 const late = await harness.coordinator.verifyPreparedAttempt()
 
                 expect(early).toMatchObject({
                     error: {
-                        confirmationCheckAfter: '2026-08-02T10:00:30.000Z',
+                        confirmationCheckAfter: '2026-08-02T10:03:00.000Z',
+                    },
+                })
+                expect(stillEarly).toMatchObject({
+                    error: {
+                        confirmationCheckAfter: '2026-08-02T10:03:00.000Z',
                     },
                 })
                 expect(late).toMatchObject({

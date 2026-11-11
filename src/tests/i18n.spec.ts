@@ -231,8 +231,13 @@ describe('interface translations', () => {
         const translate = TestBed.inject(TranslateService)
         const key = 'MANAGE_TAGS.REMOVE_ALL_HIDDEN_TAGS'
 
+        // a catalog that does not have the text yet
+        const german = structuredClone(readTranslations('de'))
+        delete (german.MANAGE_TAGS as Record<string, unknown>)
+            .REMOVE_ALL_HIDDEN_TAGS
+
         translate.setTranslation('en', english)
-        translate.setTranslation('de', readTranslations('de'))
+        translate.setTranslation('de', german)
         await firstValueFrom(translate.use('de'))
 
         expect(translate.instant(key)).toBe('Remove all')

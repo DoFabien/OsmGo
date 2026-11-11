@@ -31,13 +31,47 @@ export const defaultCountryFromLocale = (
     }
     for (const language of languages) {
         try {
+            // `es-419` or `ar-001` carry a numeric area, not a country
             const region = new Intl.Locale(language).maximize().region
-            if (region) return region
+            if (region && /^[A-Z]{2}$/.test(region)) return region
         } catch {
             // Not a valid BCP 47 tag: try the next preferred language.
         }
     }
     return 'GB'
+}
+
+/**
+ * The interface language to use for a requested one: itself when it is
+ * offered, else the offered variant of the same language (`zh` is only
+ * offered as `zh-CN` and `zh-TW`), else English.
+ */
+export const resolveUiLanguage = (
+    requested: string,
+    offered: readonly string[],
+    preferred: readonly string[] = []
+): string => {
+    if (offered.includes(requested)) return requested
+    const base = requested.split('-')[0]
+    const variants = offered.filter(
+        (language) => language.split('-')[0] === base
+    )
+    if (variants.length === 0) return 'en'
+    for (const language of preferred) {
+        if (variants.includes(language)) return language
+        try {
+            const { script, region } = new Intl.Locale(language).maximize()
+            if (language.split('-')[0] !== base) continue
+            const match = variants.find((variant) => {
+                const locale = new Intl.Locale(variant).maximize()
+                return locale.script === script || locale.region === region
+            })
+            if (match) return match
+        } catch {
+            // Not a valid BCP 47 tag: try the next preferred language.
+        }
+    }
+    return variants[0]
 }
 
 export interface User {
@@ -387,11 +421,11 @@ export class ConfigService {
                 )
                 const requestedUiLanguage =
                     d?.languageUi || this.config().languageUi || 'en'
-                const languageUi = (i18nConfig?.uiLanguages ?? ['en']).includes(
-                    requestedUiLanguage
+                const languageUi = resolveUiLanguage(
+                    requestedUiLanguage,
+                    i18nConfig?.uiLanguages ?? ['en'],
+                    window.navigator.languages ?? [window.navigator.language]
                 )
-                    ? requestedUiLanguage
-                    : 'en'
                 // V1 saved `survey:date`, its default, and never wrote this
                 // V2 setting: such a config moves once to `check_date`.
                 const savedByV1 =
@@ -690,7 +724,21 @@ export class ConfigService {
         await this.injector
             .get(DataService)
             .resetStoredOsmState({ includeQuarantine: true })
-        await this.updateConfig({ isDevServer })
+        // Each server keeps its own changeset comment draft.
+        const commentKey = (dev: boolean) =>
+            `changeSetComment:${dev ? 'dev' : 'prod'}`
+        await this.localStorage.set(
+            commentKey(!isDevServer),
+            this.config().changeSetComment
+        )
+        const restoredComment = await this.localStorage.get<string>(
+            commentKey(isDevServer)
+        )
+        await this.updateConfig({
+            isDevServer,
+            changeSetComment:
+                typeof restoredComment === 'string' ? restoredComment : '',
+        })
         this.userInfoState.set({ uid: '', display_name: '', connected: false })
         this.changeset = {
             id: '',
