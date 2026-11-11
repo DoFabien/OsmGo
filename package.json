@@ -20,6 +20,7 @@
     "android:aab": "npm run android:prepare && ./android/gradlew -p android --no-daemon bundleRelease",
     "android:release": "npm run android:prepare && ./android/gradlew -p android --no-daemon clean testReleaseUnitTest lintRelease assembleRelease bundleRelease",
     "android:studio": "npx cap open android",
+    "android:version-code": "node scripts/android-version-code.mjs",
     "test": "npm run config && ng test --watch=false && ng test --configuration browser",
     "test:coverage": "npm run config && ng test --watch=false --coverage && ng test --configuration browser",
     "test:ci": "npm run config && ng test --configuration ci --coverage && ng test --configuration browser",

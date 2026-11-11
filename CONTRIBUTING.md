@@ -206,7 +206,7 @@ There is currently no supported export/import for a pending queue. If an upload 
 Create `release/X.Y.Z` from `develop`. A release branch contains only:
 
 - `version` in `package.json`;
-- a strictly increasing `VERSION_CODE` in `android/version.properties`;
+- a strictly increasing `VERSION_CODE` in `android/version.properties`, set to the current Unix time by `npm run android:version-code`;
 - changelog and release notes.
 
 Before merging, run the complete checks, build the signed Docker artifacts, compare the signing certificate SHA-256 fingerprint with the existing Play application, and test an upgrade from version 1.7.0 without losing pending data.
