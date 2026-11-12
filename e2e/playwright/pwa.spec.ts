@@ -409,6 +409,30 @@ test('loads interface translations', async ({ page }) => {
     )
 })
 
+for (const viewport of [
+    { width: 360, height: 740 },
+    { width: 1280, height: 800 },
+]) {
+    test(`keeps the map credits folded at ${viewport.width}px`, async ({
+        page,
+    }) => {
+        await page.setViewportSize(viewport)
+        await openApp(page)
+        const credits = page.locator('.maplibregl-ctrl-attrib')
+
+        await expect(credits).toHaveClass(/maplibregl-compact/)
+        await expect(credits).not.toHaveClass(/maplibregl-compact-show/)
+        await expect(
+            credits.locator('.maplibregl-ctrl-attrib-inner')
+        ).toBeHidden()
+
+        await credits.locator('.maplibregl-ctrl-attrib-button').click()
+        await expect(
+            credits.locator('.maplibregl-ctrl-attrib-inner')
+        ).toBeVisible()
+    })
+}
+
 test('keeps one unified feature sheet for details and raw OSM codes', async ({
     page,
 }) => {

@@ -9,6 +9,7 @@ import {
 } from '@angular/core'
 import { ActivatedRoute, type Params, Router } from '@angular/router'
 import { resolveAppUrl } from '@app/utils/asset-url'
+import { CollapsedAttributionControl } from '@app/utils/collapsed-attribution-control'
 import { isDeepEqual } from '@app/utils/deep-equal'
 import { Haptics, ImpactStyle } from '@capacitor/haptics'
 import { TranslateService } from '@ngx-translate/core'
@@ -51,7 +52,7 @@ import type {
 } from 'geojson'
 import {
     type AddLayerObject,
-    AttributionControl,
+    type AttributionControl,
     type FilterSpecification,
     type GeoJSONFeatureId,
     type GeoJSONSource,
@@ -834,7 +835,7 @@ export class MapService {
         ) {
             this.map.removeControl(this.attributionControl)
         }
-        this.attributionControl = new AttributionControl({
+        this.attributionControl = new CollapsedAttributionControl({
             customAttribution: attribution,
         })
         this.map.addControl(this.attributionControl)
@@ -1281,9 +1282,10 @@ export class MapService {
                         this.bearingState.set(activeMap.getBearing())
 
                         activeMap.addControl(new NavigationControl())
-                        this.attributionControl = new AttributionControl({
-                            customAttribution: '',
-                        })
+                        this.attributionControl =
+                            new CollapsedAttributionControl({
+                                customAttribution: '',
+                            })
                         activeMap.addControl(this.attributionControl)
                         activeMap.addControl(
                             new ScaleControl({ maxWidth: 160, unit: 'metric' })
