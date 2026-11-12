@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Přesunout objekt",
             "PLACE_HERE": "Umístit sem",
             "MOVE_HERE": "Přesunout sem",
+            "FOLLOW_HEADING": "Otáčet mapu podle zařízení",
             "RESET_NORTH": "Natočit mapu severem nahoru",
             "REFRESH_ZOOM_HINT": "Pro stažení dat mapu přibližte"
         },

@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "移动对象",
             "PLACE_HERE": "放在这里",
             "MOVE_HERE": "移到这里",
+            "FOLLOW_HEADING": "让地图随设备方向旋转",
             "RESET_NORTH": "将地图转为正北朝上",
             "REFRESH_ZOOM_HINT": "请放大地图以下载数据"
         },

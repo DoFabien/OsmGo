@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Moure un objecte",
             "PLACE_HERE": "Col·locar aquí",
             "MOVE_HERE": "Moure aquí",
+            "FOLLOW_HEADING": "Orientar el mapa segons el dispositiu",
             "RESET_NORTH": "Orientar el mapa cap al nord",
             "REFRESH_ZOOM_HINT": "Amplia el mapa per baixar dades"
         },

@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Déplacer un objet",
             "PLACE_HERE": "Placer ici",
             "MOVE_HERE": "Déplacer ici",
+            "FOLLOW_HEADING": "Orienter la carte selon l'appareil",
             "RESET_NORTH": "Orienter la carte vers le nord",
             "REFRESH_ZOOM_HINT": "Zoomez pour télécharger les données"
         },

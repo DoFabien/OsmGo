@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Pindahkan objek",
             "PLACE_HERE": "Taruh di sini",
             "MOVE_HERE": "Pindah ke sini",
+            "FOLLOW_HEADING": "Putar peta mengikuti perangkat",
             "RESET_NORTH": "Arahkan utara peta ke atas",
             "REFRESH_ZOOM_HINT": "Perbesar peta untuk mengunduh data"
         },

@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Een object verplaatsen",
             "PLACE_HERE": "Hier plaatsen",
             "MOVE_HERE": "Hierheen",
+            "FOLLOW_HEADING": "De kaart met het apparaat meedraaien",
             "RESET_NORTH": "De kaart naar het noorden draaien",
             "REFRESH_ZOOM_HINT": "Zoom in om gegevens te downloaden"
         },

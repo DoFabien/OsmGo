@@ -53,6 +53,13 @@ export class MapControlsComponent {
         )
     }
 
+    /** What a tap on the compass does now. */
+    readonly compassLabelKey = computed(() =>
+        !this.mapService.followsHeading() && this.mapService.canFollowHeading()
+            ? 'MAIN.BUTTONS.FOLLOW_HEADING'
+            : 'MAIN.BUTTONS.RESET_NORTH'
+    )
+
     readonly refreshBlockedByZoom = computed(
         () => (this.configService.currentZoom() ?? 0) < MIN_DOWNLOAD_ZOOM
     )

@@ -60,6 +60,8 @@ describe('MapService initialization', () => {
             basemapAttributionText: { value: '', writable: true },
             mapInitializationErrorState: { value: errorState },
             mapInitializationError: { value: errorState.asReadonly() },
+            headingIsLockedState: { value: signal(true) },
+            positionIsFollowState: { value: signal(true) },
             _ngZone: { value: { run: (callback: () => void) => callback() } },
         })
         return service
@@ -263,6 +265,10 @@ describe('MapService lifecycle', () => {
 
     it('replaces movement markers instead of accumulating sessions', () => {
         const service = Object.create(MapService.prototype) as MapService
+        Object.defineProperties(service, {
+            headingIsLockedState: { value: signal(true) },
+            positionIsFollowState: { value: signal(true) },
+        })
         const firstMarker = { addTo: vi.fn(), remove: vi.fn() }
         const secondMarker = { addTo: vi.fn(), remove: vi.fn() }
         service.positionIsFollow = true
@@ -1738,6 +1744,61 @@ describe('MapService with a stubbed MapLibre map', () => {
                     remove: vi.fn(),
                     setLngLat: vi.fn(),
                 })
+
+        it('turns the map with the phone again on a second tap on the compass', () => {
+            const { boot, compassHeading, map, service } = createHarness()
+            compassHeading.trueHeading = 90
+            boot()
+            expect(service.followsHeading()).toBe(true)
+
+            service.toggleCompass()
+
+            expect(map.easeTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 0 })
+            )
+            expect(service.headingIsLocked).toBe(false)
+            expect(service.followsHeading()).toBe(false)
+
+            service.toggleCompass()
+
+            expect(map.easeTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 90 })
+            )
+            expect(service.headingIsLocked).toBe(true)
+            expect(service.followsHeading()).toBe(true)
+        })
+
+        it('only puts north up with the compass once the map left the user', () => {
+            const { boot, compassHeading, map, service } = createHarness()
+            compassHeading.trueHeading = 90
+            boot()
+            service.toggleCompass()
+            service.positionIsFollow = false
+
+            service.toggleCompass()
+
+            expect(map.easeTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 0 })
+            )
+            expect(service.headingIsLocked).toBe(false)
+            expect(service.canFollowHeading()).toBe(false)
+        })
+
+        it('only puts north up with the compass when orientation tracking is off', () => {
+            const { boot, compassHeading, map, service } = createHarness({
+                config: { lockMapHeading: false },
+            })
+            compassHeading.trueHeading = 90
+            boot()
+
+            service.toggleCompass()
+            service.toggleCompass()
+
+            expect(map.easeTo).toHaveBeenLastCalledWith(
+                expect.objectContaining({ bearing: 0 })
+            )
+            expect(service.followsHeading()).toBe(false)
+        })
 
         it('keeps north up after the compass until the GPS button is used', () => {
             const { boot, compassHeading, fix, map, newLocation$, service } =

@@ -39,6 +39,15 @@ button {
         'opsz' 28;
 }
 
+// The map turns with the phone: the button looks switched on.
+.compass-button.is-following {
+    background: var(--osmgo-blue-container);
+
+    mat-icon {
+        color: var(--osmgo-blue);
+    }
+}
+
 .map-control--pending {
     top: max(14px, env(safe-area-inset-top));
     right: 14px;

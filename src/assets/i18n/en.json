@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Move an object",
             "PLACE_HERE": "Place here",
             "MOVE_HERE": "Move here",
+            "FOLLOW_HEADING": "Turn the map with the device",
             "RESET_NORTH": "Turn the map north up",
             "REFRESH_ZOOM_HINT": "Zoom in to download data"
         },

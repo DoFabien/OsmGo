@@ -112,7 +112,8 @@
       "CONFIRM_MOVE": "Tooltip and aria-label of the move icon button in the editor footer: starts relocating the existing object on the map. Imperative.",
       "PLACE_HERE": "Label of the main button at the bottom of the map while placing a NEW object: the object will be created at the marker in the middle of the map, then the editor opens. Next to a Cancel button. Short (about 15 characters).",
       "MOVE_HERE": "Label of the main button at the bottom of the map while moving an existing object: the object will be moved to the marker in the middle of the map, then the editor opens again. Next to a Cancel button. Short (about 15 characters).",
-      "RESET_NORTH": "Tooltip and aria-label of the compass button always shown at the bottom right of the map, above the action bar; its arrow points north. It rotates the map back so that north is at the top and stops following the device orientation. Imperative.",
+      "FOLLOW_HEADING": "Tooltip and aria-label of the compass button at the bottom right of the map while north is up and the map stays on the user's position; a tap makes the map turn again with the orientation of the phone or tablet. Imperative.",
+      "RESET_NORTH": "Tooltip and aria-label of the compass button always shown at the bottom right of the map, above the action bar; its arrow points north. It rotates the map back so that north is at the top and stops following the device orientation; while north is up and the map stays on the user, the button shows FOLLOW_HEADING instead. Imperative.",
       "REFRESH_ZOOM_HINT": "Hint (tooltip on the disabled download button and toast) telling users to zoom the map in before data can be downloaded. Imperative."
     },
     "LOCATION": {

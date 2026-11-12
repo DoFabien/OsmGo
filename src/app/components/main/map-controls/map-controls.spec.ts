@@ -17,6 +17,8 @@ describe('MapControlsComponent', () => {
     const gpsIsReady = signal(false)
     const uploadNeedsAttention = signal(false)
     const bearing = signal(0)
+    const canFollowHeading = signal(true)
+    const followsHeading = signal(true)
     const geolocationIssue = signal<
         'denied' | 'unavailable' | 'timeout' | null
     >(null)
@@ -27,6 +29,8 @@ describe('MapControlsComponent', () => {
         gpsIsReady.set(false)
         uploadNeedsAttention.set(false)
         geolocationIssue.set(null)
+        canFollowHeading.set(true)
+        followsHeading.set(true)
         TestBed.configureTestingModule({
             imports: [MapControlsComponent, TranslateModule.forRoot()],
             providers: [
@@ -58,7 +62,10 @@ describe('MapControlsComponent', () => {
                     provide: MapService,
                     useValue: {
                         bearing,
+                        canFollowHeading,
+                        followsHeading,
                         resetNorth: vi.fn(),
+                        toggleCompass: vi.fn(),
                         centerOnMyPosition: vi.fn(),
                         displaySatelliteBaseMap: vi.fn(),
                         isDisplaySatelliteBaseMap: () => false,
@@ -78,11 +85,13 @@ describe('MapControlsComponent', () => {
                 BUTTONS: {
                     ADD_NEW: 'Créer un objet',
                     CENTER_GPS: 'Centrer la carte sur ma position',
+                    FOLLOW_HEADING: "Orienter la carte selon l'appareil",
                     LOAD_DATA: 'Télécharger les données',
                     LOADING_DATA: 'Chargement',
                     MENU: 'Menu',
                     REFRESH_DATA: 'Actualiser',
                     REFRESH_ZOOM_HINT: 'Zoomez pour télécharger',
+                    RESET_NORTH: 'Orienter la carte vers le nord',
                     VIEW_AREAL_MAP: 'Imagerie aérienne',
                 },
                 LOCATION: {
@@ -326,6 +335,36 @@ describe('MapControlsComponent', () => {
         expect(rotation()).toContain('rotate(170deg)')
 
         compass.click()
-        expect(TestBed.inject(MapService).resetNorth).toHaveBeenCalledOnce()
+        expect(TestBed.inject(MapService).toggleCompass).toHaveBeenCalledOnce()
+    })
+
+    it('shows when the map turns with the phone and what a tap does', () => {
+        const fixture = TestBed.createComponent(MapControlsComponent)
+        fixture.detectChanges()
+        const compass = (fixture.nativeElement as HTMLElement).querySelector(
+            '[data-testid="reset-north"]'
+        ) as HTMLButtonElement
+
+        expect(compass.classList).toContain('is-following')
+        expect(compass.getAttribute('aria-pressed')).toBe('true')
+        expect(compass.getAttribute('aria-label')).toBe(
+            'Orienter la carte vers le nord'
+        )
+
+        followsHeading.set(false)
+        fixture.detectChanges()
+
+        expect(compass.classList).not.toContain('is-following')
+        expect(compass.getAttribute('aria-pressed')).toBe('false')
+        expect(compass.getAttribute('aria-label')).toBe(
+            "Orienter la carte selon l'appareil"
+        )
+
+        canFollowHeading.set(false)
+        fixture.detectChanges()
+
+        expect(compass.getAttribute('aria-label')).toBe(
+            'Orienter la carte vers le nord'
+        )
     })
 })

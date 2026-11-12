@@ -23,9 +23,11 @@
         class="osmgo-map-button compass-button"
         type="button"
         data-testid="reset-north"
-        [matTooltip]="'MAIN.BUTTONS.RESET_NORTH' | translate"
-        [attr.aria-label]="'MAIN.BUTTONS.RESET_NORTH' | translate"
-        (click)="mapService.resetNorth()"
+        [class.is-following]="mapService.followsHeading()"
+        [attr.aria-pressed]="mapService.followsHeading()"
+        [matTooltip]="compassLabelKey() | translate"
+        [attr.aria-label]="compassLabelKey() | translate"
+        (click)="mapService.toggleCompass()"
     >
         <mat-icon
             fontSet="material-symbols-rounded"

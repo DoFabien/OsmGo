@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Przenieś obiekt",
             "PLACE_HERE": "Umieść tutaj",
             "MOVE_HERE": "Przenieś tutaj",
+            "FOLLOW_HEADING": "Obracaj mapę zgodnie z urządzeniem",
             "RESET_NORTH": "Obróć mapę północą do góry",
             "REFRESH_ZOOM_HINT": "Przybliż mapę, aby pobrać dane"
         },

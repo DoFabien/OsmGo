@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "Objekt verschieben",
             "PLACE_HERE": "Hier platzieren",
             "MOVE_HERE": "Hier ablegen",
+            "FOLLOW_HEADING": "Karte nach dem Gerät ausrichten",
             "RESET_NORTH": "Karte nach Norden ausrichten",
             "REFRESH_ZOOM_HINT": "Zum Herunterladen von Daten hineinzoomen"
         },

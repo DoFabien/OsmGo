@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "移動物件",
             "PLACE_HERE": "放在這裡",
             "MOVE_HERE": "移到這裡",
+            "FOLLOW_HEADING": "讓地圖隨裝置方向旋轉",
             "RESET_NORTH": "將地圖轉回北方朝上",
             "REFRESH_ZOOM_HINT": "請放大地圖以下載資料"
         },

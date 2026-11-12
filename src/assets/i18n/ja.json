@@ -112,6 +112,7 @@
             "CONFIRM_MOVE": "オブジェクトを移動",
             "PLACE_HERE": "ここに配置",
             "MOVE_HERE": "ここに移動",
+            "FOLLOW_HEADING": "マップを端末の向きに合わせる",
             "RESET_NORTH": "マップを北向きに戻す",
             "REFRESH_ZOOM_HINT": "データをダウンロードするには拡大してください"
         },

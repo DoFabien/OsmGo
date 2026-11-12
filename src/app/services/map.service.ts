@@ -404,11 +404,34 @@ export class MapService {
     private readonly bearingState = signal(0)
     /** Map rotation in degrees, 0 when north is up. */
     readonly bearing = this.bearingState.asReadonly()
-    headingIsLocked: boolean = true
-    /** North was put up with the compass; only the GPS button locks the heading again. */
+    private readonly headingIsLockedState = signal(true)
+    get headingIsLocked(): boolean {
+        return this.headingIsLockedState()
+    }
+    set headingIsLocked(locked: boolean) {
+        this.headingIsLockedState.set(locked)
+    }
+    /** North was put up with the compass; the compass or the GPS button lock the heading again. */
     private northRequested = false
     private lastRenderedHeading: number | null = null
-    positionIsFollow: boolean = true
+    private readonly positionIsFollowState = signal(true)
+    get positionIsFollow(): boolean {
+        return this.positionIsFollowState()
+    }
+    set positionIsFollow(follow: boolean) {
+        this.positionIsFollowState.set(follow)
+    }
+    /** The map stays on the user and could turn with the phone. */
+    readonly canFollowHeading = computed(
+        () =>
+            this.configService.config().lockMapHeading &&
+            this.positionIsFollowState() &&
+            this.locationService.compassHeading().trueHeading !== null
+    )
+    /** The map turns with the phone: the compass shows it. */
+    readonly followsHeading = computed(
+        () => this.canFollowHeading() && this.headingIsLockedState()
+    )
     private readonly isDisplaySatelliteBaseMapState = signal(false)
     readonly isDisplaySatelliteBaseMap =
         this.isDisplaySatelliteBaseMapState.asReadonly()
@@ -956,7 +979,33 @@ export class MapService {
         this.markerMove = undefined
     }
 
-    /** Puts north up; the compass no longer turns the map until the next recentering. */
+    /**
+     * The compass button: north up while the map turns with the phone, the
+     * phone orientation again while the map stays on the user.
+     */
+    toggleCompass(): void {
+        if (!this.followsHeading() && this.canFollowHeading()) {
+            this.followHeading()
+        } else {
+            this.resetNorth()
+        }
+    }
+
+    /** The map turns with the phone again, from where it points now. */
+    private followHeading(): void {
+        if (!this.mapCreated) return
+        this.northRequested = false
+        this.headingIsLocked = true
+        if (this.layersAreLoaded) {
+            this.map.setLayoutProperty('location_user', 'icon-rotate', 0)
+        }
+        this.map.easeTo({
+            bearing: this.locationService.compassHeading().trueHeading ?? 0,
+            duration: 300,
+        })
+    }
+
+    /** Puts north up; the compass no longer turns the map until the compass or the GPS button lock it again. */
     resetNorth(): void {
         if (!this.mapCreated) return
         this.headingIsLocked = false
